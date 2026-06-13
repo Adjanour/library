@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+/* Dark theme (default) */
+:root, [data-theme="dark"] {
+  --surface-0: #0a0a0b;
+  --surface-1: #111113;
+  --surface-2: #191a1c;
+  --surface-3: #222325;
+  --surface-4: #2c2d30;
+  --accent: #5e6ad2;
+  --accent-hover: #7b85e0;
+  --text-primary: #e8e9ec;
+  --text-secondary: #8b8d98;
+  --text-muted: #5c5e6a;
+  --border: #2a2b2e;
+  --success: #4ade80;
+  --warning: #facc15;
+  --error: #ef4444;
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --surface-0: #ffffff;
+  --surface-1: #f8f9fa;
+  --surface-2: #f0f1f3;
+  --surface-3: #e4e5e8;
+  --surface-4: #d1d3d8;
+  --accent: #5e6ad2;
+  --accent-hover: #4a56be;
+  --text-primary: #1a1c20;
+  --text-secondary: #5c5e6a;
+  --text-muted: #8b8d98;
+  --border: #e0e1e4;
+  --success: #16a34a;
+  --warning: #ca8a04;
+  --error: #dc2626;
+  color-scheme: light;
+}
+
+@theme {
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-4: var(--surface-4);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-border: var(--border);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-error: var(--error);
+}
+
+:root {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  color: var(--text-primary);
+  background: var(--surface-0);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface-4); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

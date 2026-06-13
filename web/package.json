@@ -1,0 +1,22 @@
+{
+  "name": "library-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc && npx esbuild static/main.ts --bundle --format=esm --outfile=static/main.js --minify",
+    "build:ts": "tsc",
+    "build:js": "npx esbuild static/main.ts --bundle --format=esm --outfile=static/main.js --minify",
+    "watch": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "lucide": "^1.17.0"
+  }
+}

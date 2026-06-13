@@ -1,0 +1,8 @@
+bin/
+node_modules/
+dist/
+*.db
+web/static/
+web/svelte/.svelte-kit/
+web/svelte/build/
+library
