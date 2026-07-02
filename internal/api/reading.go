@@ -277,7 +277,7 @@ func (h *ReadingHandler) handleSyncFocusd(w http.ResponseWriter, r *http.Request
 
 	// Parse FocusD reading plan
 	var plan struct {
-		Today        string `json:"today"`
+		Today       string `json:"today"`
 		CurrentBook *struct {
 			Number    int    `json:"number"`
 			Title     string `json:"title"`
@@ -369,9 +369,9 @@ func (h *ReadingHandler) handleSyncReadest(w http.ResponseWriter, r *http.Reques
 
 	if len(readestBooks) == 0 {
 		writeJSON(w, models.ReadestSyncResult{
-			Success:   true,
-			Message:   "No books with progress found in Readest",
-			SyncedAt:  time.Now(),
+			Success:    true,
+			Message:    "No books with progress found in Readest",
+			SyncedAt:   time.Now(),
 			TotalBooks: 0,
 		})
 		return
@@ -385,7 +385,7 @@ func (h *ReadingHandler) handleSyncReadest(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Convert to matcher format
- matcherItems := make([]readest.LibraryItem, len(libraryItems))
+	matcherItems := make([]readest.LibraryItem, len(libraryItems))
 	for i, item := range libraryItems {
 		matcherItems[i] = readest.LibraryItem{
 			ID:       item.ID,

@@ -13,14 +13,16 @@ import (
 
 	"github.com/bernard/library/internal/db"
 	"github.com/bernard/library/internal/models"
+	"github.com/bernard/library/internal/scanner"
 )
 
 type Handler struct {
-	db *db.DB
+	db       *db.DB
+	scanDirs []string
 }
 
-func NewHandler(database *db.DB) *Handler {
-	return &Handler{db: database}
+func NewHandler(database *db.DB, scanDirs []string) *Handler {
+	return &Handler{db: database, scanDirs: scanDirs}
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
@@ -29,8 +31,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/stats", h.handleStats)
 	mux.HandleFunc("/api/categories", h.handleCategories)
 	mux.HandleFunc("/api/tags", h.handleTags)
+	mux.HandleFunc("/api/purposes", h.handlePurposes)
 	mux.HandleFunc("/api/open/", h.handleOpen)
 	mux.HandleFunc("/api/file/", h.handleFile)
+	mux.HandleFunc("/api/scan", h.handleScan)
 }
 
 // CORS middleware wraps a handler with CORS headers
@@ -55,6 +59,7 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 		Type:     r.URL.Query().Get("type"),
 		Category: r.URL.Query().Get("category"),
 		Tag:      r.URL.Query().Get("tag"),
+		Purpose:  r.URL.Query().Get("purpose"),
 		Sort:     r.URL.Query().Get("sort"),
 		Order:    r.URL.Query().Get("order"),
 	}
@@ -102,6 +107,23 @@ func (h *Handler) handleItems(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, map[string]string{"status": "deleted"})
 
+	case "PUT":
+		var u models.ItemUpdate
+		if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := h.db.UpdateItem(id, u); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		item, err := h.db.GetItem(id)
+		if err != nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, item)
+
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -132,6 +154,15 @@ func (h *Handler) handleTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, tags)
+}
+
+func (h *Handler) handlePurposes(w http.ResponseWriter, r *http.Request) {
+	purposes, err := h.db.GetPurposes()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, purposes)
 }
 
 func (h *Handler) handleOpen(w http.ResponseWriter, r *http.Request) {
@@ -207,6 +238,28 @@ func (h *Handler) handleFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.ServeFile(w, r, item.Path)
+}
+
+func (h *Handler) handleScan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if len(h.scanDirs) == 0 {
+		writeJSON(w, map[string]int{"indexed": 0, "total": 0})
+		return
+	}
+	force := r.URL.Query().Get("force") == "true" || r.URL.Query().Get("force") == "1"
+	sc := scanner.New(h.db, h.scanDirs)
+	total := 0
+	indexed, err := sc.ScanAllOpts(func(current, t int, filename string) {
+		total = t
+	}, force)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]int{"indexed": indexed, "total": total})
 }
 
 func writeJSON(w http.ResponseWriter, data interface{}) {

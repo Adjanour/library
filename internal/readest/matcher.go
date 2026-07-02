@@ -11,18 +11,18 @@ import (
 type MatchStrategy int
 
 const (
-	MatchByPath    MatchStrategy = iota // Exact path match
-	MatchByFilename                     // Basename match
-	MatchByTitle                        // Fuzzy title match
+	MatchByPath     MatchStrategy = iota // Exact path match
+	MatchByFilename                      // Basename match
+	MatchByTitle                         // Fuzzy title match
 )
 
 // MatchResult represents a matched book
 type MatchResult struct {
-	ReadestBook    ReadestBookEnriched
-	LibraryItemID  int64         // -1 if no match
-	LibraryTitle   string        // Title from library (for verification)
-	MatchStrategy  MatchStrategy
-	Confidence     float64       // 0.0 - 1.0
+	ReadestBook   ReadestBookEnriched
+	LibraryItemID int64  // -1 if no match
+	LibraryTitle  string // Title from library (for verification)
+	MatchStrategy MatchStrategy
+	Confidence    float64 // 0.0 - 1.0
 }
 
 // LibraryItem represents a minimal item from the library for matching
@@ -86,17 +86,17 @@ func (n *titleNormalizer) normalizeForFilename(title string) string {
 func (m *Matcher) calculateTitleSimilarity(a, b string) float64 {
 	a = m.normalizer.normalize(a)
 	b = m.normalizer.normalize(b)
-	
+
 	// Exact match after normalization
 	if a == b {
 		return 1.0
 	}
-	
+
 	// One contains the other
 	if strings.Contains(a, b) || strings.Contains(b, a) {
 		return 0.9
 	}
-	
+
 	// Check if titles start the same (handles truncation)
 	minLen := len(a)
 	if len(b) < minLen {
@@ -109,15 +109,15 @@ func (m *Matcher) calculateTitleSimilarity(a, b string) float64 {
 			return 0.85
 		}
 	}
-	
+
 	// Word overlap calculation
 	aWords := strings.Fields(a)
 	bWords := strings.Fields(b)
-	
+
 	if len(aWords) == 0 || len(bWords) == 0 {
 		return 0.0
 	}
-	
+
 	// Count matching words
 	matchCount := 0
 	bWordSet := make(map[string]bool)
@@ -129,13 +129,13 @@ func (m *Matcher) calculateTitleSimilarity(a, b string) float64 {
 			matchCount++
 		}
 	}
-	
+
 	// Jaccard-like similarity
 	totalWords := len(aWords) + len(bWords) - matchCount
 	if totalWords == 0 {
 		return 0.0
 	}
-	
+
 	return float64(matchCount) / float64(totalWords)
 }
 
@@ -147,30 +147,30 @@ func extractFilename(path string) string {
 // MatchAll matches all Readest books to library items
 func (m *Matcher) MatchAll(readestBooks []ReadestBookEnriched, libraryItems []LibraryItem) []MatchResult {
 	results := make([]MatchResult, 0, len(readestBooks))
-	
+
 	// Build indexes for faster lookup
-	pathIndex := make(map[string]int64)    // normalized path -> item ID
+	pathIndex := make(map[string]int64)     // normalized path -> item ID
 	filenameIndex := make(map[string]int64) // normalized filename -> item ID
-	
+
 	for _, item := range libraryItems {
 		// Index by path
 		normalizedPath := strings.ToLower(item.Path)
 		pathIndex[normalizedPath] = item.ID
-		
+
 		// Index by normalized filename
 		normalizedFilename := m.normalizer.normalizeForFilename(extractFilename(item.Filename))
 		if normalizedFilename != "" {
 			filenameIndex[normalizedFilename] = item.ID
 		}
 	}
-	
+
 	for _, book := range readestBooks {
 		result := MatchResult{
 			ReadestBook:   book,
 			LibraryItemID: -1,
 			Confidence:    0.0,
 		}
-		
+
 		// Strategy 1: Match by file path
 		if book.FilePath != "" {
 			normalizedPath := strings.ToLower(book.FilePath)
@@ -182,7 +182,7 @@ func (m *Matcher) MatchAll(readestBooks []ReadestBookEnriched, libraryItems []Li
 				continue
 			}
 		}
-		
+
 		// Strategy 2: Match by filename
 		if book.FilePath != "" {
 			normalizedFilename := m.normalizer.normalizeForFilename(extractFilename(book.FilePath))
@@ -196,7 +196,7 @@ func (m *Matcher) MatchAll(readestBooks []ReadestBookEnriched, libraryItems []Li
 				}
 			}
 		}
-		
+
 		// Also try matching by title from Readest (without extension)
 		if book.FilePath != "" {
 			titleFromFilename := m.normalizer.normalizeForFilename(book.Title)
@@ -210,12 +210,12 @@ func (m *Matcher) MatchAll(readestBooks []ReadestBookEnriched, libraryItems []Li
 				}
 			}
 		}
-		
+
 		// Strategy 3: Fuzzy title match
 		bestID := int64(-1)
 		bestScore := 0.0
 		bestTitle := ""
-		
+
 		for _, item := range libraryItems {
 			score := m.calculateTitleSimilarity(book.Title, item.Title)
 			if score > bestScore && score >= 0.6 { // Minimum threshold
@@ -224,17 +224,17 @@ func (m *Matcher) MatchAll(readestBooks []ReadestBookEnriched, libraryItems []Li
 				bestTitle = item.Title
 			}
 		}
-		
+
 		if bestID != -1 {
 			result.LibraryItemID = bestID
 			result.LibraryTitle = bestTitle
 			result.MatchStrategy = MatchByTitle
 			result.Confidence = bestScore
 		}
-		
+
 		results = append(results, result)
 	}
-	
+
 	return results
 }
 
@@ -247,7 +247,7 @@ func GetMatchStats(results []MatchResult) map[string]interface{} {
 	byFilename := 0
 	byTitle := 0
 	lowConfidence := 0
-	
+
 	for _, r := range results {
 		if r.LibraryItemID != -1 {
 			matched++
@@ -266,15 +266,15 @@ func GetMatchStats(results []MatchResult) map[string]interface{} {
 			unmatched++
 		}
 	}
-	
+
 	return map[string]interface{}{
-		"total":           total,
-		"matched":         matched,
-		"unmatched":       unmatched,
-		"by_path":         byPath,
-		"by_filename":     byFilename,
-		"by_title":        byTitle,
-		"low_confidence":  lowConfidence,
+		"total":          total,
+		"matched":        matched,
+		"unmatched":      unmatched,
+		"by_path":        byPath,
+		"by_filename":    byFilename,
+		"by_title":       byTitle,
+		"low_confidence": lowConfidence,
 	}
 }
 

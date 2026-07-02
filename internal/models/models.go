@@ -22,6 +22,7 @@ type Item struct {
 	Type        BookType  `json:"type"`
 	Category    string    `json:"category"`
 	Tags        string    `json:"tags"`
+	Purpose     string    `json:"purpose"`
 	Description string    `json:"description"`
 	Size        int64     `json:"size"`
 	AddedAt     time.Time `json:"added_at"`
@@ -33,6 +34,7 @@ type SearchQuery struct {
 	Type     string `form:"type"`
 	Category string `form:"category"`
 	Tag      string `form:"tag"`
+	Purpose  string `form:"purpose"`
 	Year     int    `form:"year"`
 	Sort     string `form:"sort"`
 	Order    string `form:"order"`
@@ -66,17 +68,29 @@ type Tag struct {
 	Count int    `json:"count"`
 }
 
+// ItemUpdate holds editable metadata for a partial update of an item.
+// Only non-nil fields are applied.
+type ItemUpdate struct {
+	Title       *string `json:"title,omitempty"`
+	Authors     *string `json:"authors,omitempty"`
+	Year        *int    `json:"year,omitempty"`
+	Category    *string `json:"category,omitempty"`
+	Tags        *string `json:"tags,omitempty"`
+	Purpose     *string `json:"purpose,omitempty"`
+	Description *string `json:"description,omitempty"`
+}
+
 // Reading progress for a book
 type ReadingProgress struct {
-	ItemID           int64      `json:"item_id"`
-	Status           string     `json:"status"` // unread, reading, finished, abandoned
-	ProgressPercent  int        `json:"progress_percent"`
-	CurrentPage      int        `json:"current_page"`
-	TotalPages       int        `json:"total_pages"`
-	StartedAt        *time.Time `json:"started_at"`
-	FinishedAt       *time.Time `json:"finished_at"`
-	LastReadAt       *time.Time `json:"last_read_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	ItemID          int64      `json:"item_id"`
+	Status          string     `json:"status"` // unread, reading, finished, abandoned
+	ProgressPercent int        `json:"progress_percent"`
+	CurrentPage     int        `json:"current_page"`
+	TotalPages      int        `json:"total_pages"`
+	StartedAt       *time.Time `json:"started_at"`
+	FinishedAt      *time.Time `json:"finished_at"`
+	LastReadAt      *time.Time `json:"last_read_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 // A single reading session
@@ -91,65 +105,65 @@ type ReadingSession struct {
 
 // Item in the reading queue
 type ReadingQueueItem struct {
-	ID                int64      `json:"id"`
-	ItemID            *int64     `json:"item_id"`
-	FocusdBookNumber  *int       `json:"focusd_book_number"`
-	Title             string     `json:"title"`
-	Author            string     `json:"author"`
-	Priority          int        `json:"priority"`
-	AddedAt           time.Time  `json:"added_at"`
-	FilePath          *string    `json:"file_path,omitempty"`
-	Filename          *string    `json:"filename,omitempty"`
-	FileType          *string    `json:"file_type,omitempty"`
+	ID               int64     `json:"id"`
+	ItemID           *int64    `json:"item_id"`
+	FocusdBookNumber *int      `json:"focusd_book_number"`
+	Title            string    `json:"title"`
+	Author           string    `json:"author"`
+	Priority         int       `json:"priority"`
+	AddedAt          time.Time `json:"added_at"`
+	FilePath         *string   `json:"file_path,omitempty"`
+	Filename         *string   `json:"filename,omitempty"`
+	FileType         *string   `json:"file_type,omitempty"`
 }
 
 // Dashboard aggregation
 type ReadingDashboard struct {
-	CurrentlyReading  []ReadingStatusItem `json:"currently_reading"`
-	Queue             []ReadingQueueItem  `json:"queue"`
-	TotalReadBooks    int                 `json:"total_read_books"`
-	TotalReadingMin   int                 `json:"total_reading_minutes"`
-	TodayReadingMin   int                 `json:"today_reading_minutes"`
-	WeekReadingMin    int                 `json:"week_reading_minutes"`
+	CurrentlyReading []ReadingStatusItem `json:"currently_reading"`
+	Queue            []ReadingQueueItem  `json:"queue"`
+	TotalReadBooks   int                 `json:"total_read_books"`
+	TotalReadingMin  int                 `json:"total_reading_minutes"`
+	TodayReadingMin  int                 `json:"today_reading_minutes"`
+	WeekReadingMin   int                 `json:"week_reading_minutes"`
 }
 
 type ReadingStatusItem struct {
-	Item            Item           `json:"item"`
-	Progress        ReadingProgress `json:"progress"`
-	TodayMinutes    int            `json:"today_minutes"`
-	TotalMinutes    int            `json:"total_minutes"`
+	Item         Item            `json:"item"`
+	Progress     ReadingProgress `json:"progress"`
+	TodayMinutes int             `json:"today_minutes"`
+	TotalMinutes int             `json:"total_minutes"`
 }
 
 // ReadestSyncStatus represents the status of Readest sync
 type ReadestSyncStatus struct {
-	Enabled         bool       `json:"enabled"`
-	LastSyncAt      *time.Time `json:"last_sync_at"`
-	TotalBooks      int        `json:"total_books"`
-	MatchedBooks    int        `json:"matched_books"`
-	UnmatchedBooks  int        `json:"unmatched_books"`
-	CurrentlyReading int       `json:"currently_reading"`
+	Enabled          bool       `json:"enabled"`
+	LastSyncAt       *time.Time `json:"last_sync_at"`
+	TotalBooks       int        `json:"total_books"`
+	MatchedBooks     int        `json:"matched_books"`
+	UnmatchedBooks   int        `json:"unmatched_books"`
+	CurrentlyReading int        `json:"currently_reading"`
 }
 
 // ReadestSyncResult represents the result of a sync operation
 type ReadestSyncResult struct {
-	Success         bool       `json:"success"`
-	Message         string     `json:"message"`
-	SyncedAt        time.Time  `json:"synced_at"`
-	TotalBooks      int        `json:"total_books"`
-	MatchedBooks    int        `json:"matched_books"`
-	UnmatchedBooks  int        `json:"unmatched_books"`
-	UpdatedProgress int        `json:"updated_progress"`
+	Success         bool                `json:"success"`
+	Message         string              `json:"message"`
+	SyncedAt        time.Time           `json:"synced_at"`
+	TotalBooks      int                 `json:"total_books"`
+	MatchedBooks    int                 `json:"matched_books"`
+	UnmatchedBooks  int                 `json:"unmatched_books"`
+	UpdatedProgress int                 `json:"updated_progress"`
 	Books           []ReadestSyncedBook `json:"books,omitempty"`
 }
 
 // ReadestSyncedBook represents a book that was synced
 type ReadestSyncedBook struct {
-	Hash            string `json:"hash"`
-	Title           string `json:"title"`
-	LibraryItemID   int64  `json:"library_item_id"`
-	CurrentPage     int    `json:"current_page"`
-	TotalPages      int    `json:"total_pages"`
-	ProgressPercent int    `json:"progress_percent"`
-	MatchStrategy   string `json:"match_strategy"`
+	Hash            string  `json:"hash"`
+	Title           string  `json:"title"`
+	LibraryItemID   int64   `json:"library_item_id"`
+	CurrentPage     int     `json:"current_page"`
+	TotalPages      int     `json:"total_pages"`
+	ProgressPercent int     `json:"progress_percent"`
+	MatchStrategy   string  `json:"match_strategy"`
 	Confidence      float64 `json:"confidence"`
 }

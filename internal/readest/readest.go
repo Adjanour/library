@@ -12,39 +12,39 @@ import (
 
 // ReadestBook represents a book from Readest's library.json
 type ReadestBook struct {
-	Hash           string                 `json:"hash"`
-	Format         string                 `json:"format"`
-	Title          string                 `json:"title"`
-	SourceTitle    string                 `json:"sourceTitle"`
-	PrimaryLang    string                 `json:"primaryLanguage"`
-	Author         string                 `json:"author"`
-	Metadata       map[string]interface{} `json:"metadata"`
-	CreatedAt      int64                  `json:"createdAt"`
-	UploadedAt     *int64                 `json:"uploadedAt"`
-	DeletedAt      *int64                 `json:"deletedAt"`
-	DownloadedAt   *int64                 `json:"downloadedAt"`
-	UpdatedAt      int64                  `json:"updatedAt"`
-	MetaHash       string                 `json:"metaHash"`
-	Progress       []int                  `json:"progress"` // [currentPage, totalPages]
+	Hash         string                 `json:"hash"`
+	Format       string                 `json:"format"`
+	Title        string                 `json:"title"`
+	SourceTitle  string                 `json:"sourceTitle"`
+	PrimaryLang  string                 `json:"primaryLanguage"`
+	Author       string                 `json:"author"`
+	Metadata     map[string]interface{} `json:"metadata"`
+	CreatedAt    int64                  `json:"createdAt"`
+	UploadedAt   *int64                 `json:"uploadedAt"`
+	DeletedAt    *int64                 `json:"deletedAt"`
+	DownloadedAt *int64                 `json:"downloadedAt"`
+	UpdatedAt    int64                  `json:"updatedAt"`
+	MetaHash     string                 `json:"metaHash"`
+	Progress     []int                  `json:"progress"` // [currentPage, totalPages]
 }
 
 // ReadestConfig represents per-book config.json
 type ReadestConfig struct {
-	UpdatedAt      int64                  `json:"updatedAt"`
-	ViewSettings   map[string]interface{} `json:"viewSettings"`
-	SearchConfig   map[string]interface{} `json:"searchConfig"`
-	Progress       []int                  `json:"progress"` // [currentPage, totalPages]
-	Location       string                 `json:"location"` // epubcfi position
-	LastSyncedAtCfg *int64                `json:"lastSyncedAtConfig"`
-	LastSyncedAtNt  *int64                `json:"lastSyncedAtNotes"`
+	UpdatedAt       int64                  `json:"updatedAt"`
+	ViewSettings    map[string]interface{} `json:"viewSettings"`
+	SearchConfig    map[string]interface{} `json:"searchConfig"`
+	Progress        []int                  `json:"progress"` // [currentPage, totalPages]
+	Location        string                 `json:"location"` // epubcfi position
+	LastSyncedAtCfg *int64                 `json:"lastSyncedAtConfig"`
+	LastSyncedAtNt  *int64                 `json:"lastSyncedAtNotes"`
 }
 
 // ReadestBookEnriched is a ReadestBook with config data merged
 type ReadestBookEnriched struct {
 	ReadestBook
-	Config         *ReadestConfig
-	FilePath       string // Actual path to the epub file
-	ProgressPct    int    // Calculated percentage
+	Config             *ReadestConfig
+	FilePath           string // Actual path to the epub file
+	ProgressPct        int    // Calculated percentage
 	IsCurrentlyReading bool
 }
 
@@ -56,7 +56,7 @@ type ReadestLibrary struct {
 // NewReadestLibrary creates a new ReadestLibrary with default paths
 func NewReadestLibrary() *ReadestLibrary {
 	home, _ := os.UserHomeDir()
-	
+
 	dirs := []string{
 		// Flatpak data directory
 		filepath.Join(home, ".var/app/com.bilingify.readest/data/com.bilingify.readest/Readest/Books"),
@@ -64,7 +64,7 @@ func NewReadestLibrary() *ReadestLibrary {
 		filepath.Join(home, "Documents/testing-readest/Readest/Books"),
 		// User-configured directory (future)
 	}
-	
+
 	return &ReadestLibrary{
 		DataDirs: dirs,
 	}
@@ -92,18 +92,18 @@ func (r *ReadestLibrary) ReadLibrary() ([]ReadestBook, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	path := filepath.Join(dataDir, "library.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read library.json: %w", err)
 	}
-	
+
 	var books []ReadestBook
 	if err := json.Unmarshal(data, &books); err != nil {
 		return nil, fmt.Errorf("failed to parse library.json: %w", err)
 	}
-	
+
 	return books, nil
 }
 
@@ -113,7 +113,7 @@ func (r *ReadestLibrary) ReadBookConfig(hash string) (*ReadestConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	configPath := filepath.Join(dataDir, hash, "config.json")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -122,12 +122,12 @@ func (r *ReadestLibrary) ReadBookConfig(hash string) (*ReadestConfig, error) {
 		}
 		return nil, fmt.Errorf("failed to read config.json for %s: %w", hash, err)
 	}
-	
+
 	var config ReadestConfig
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse config.json for %s: %w", hash, err)
 	}
-	
+
 	return &config, nil
 }
 
@@ -137,13 +137,13 @@ func (r *ReadestLibrary) findBookFile(hash string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	bookDir := filepath.Join(dataDir, hash)
 	entries, err := os.ReadDir(bookDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to read book directory %s: %w", hash, err)
 	}
-	
+
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -153,7 +153,7 @@ func (r *ReadestLibrary) findBookFile(hash string) (string, error) {
 			return filepath.Join(bookDir, entry.Name()), nil
 		}
 	}
-	
+
 	return "", fmt.Errorf("no book file found in %s", bookDir)
 }
 
@@ -163,19 +163,19 @@ func (r *ReadestLibrary) GetAllBooksWithProgress() ([]ReadestBookEnriched, error
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var enriched []ReadestBookEnriched
-	
+
 	for _, book := range books {
 		// Skip books with no progress
 		if len(book.Progress) < 2 || book.Progress[0] == 0 {
 			continue
 		}
-		
+
 		e := ReadestBookEnriched{
 			ReadestBook: book,
 		}
-		
+
 		// Read config for detailed position
 		config, _ := r.ReadBookConfig(book.Hash)
 		if config != nil {
@@ -185,29 +185,29 @@ func (r *ReadestLibrary) GetAllBooksWithProgress() ([]ReadestBookEnriched, error
 				e.Progress = config.Progress
 			}
 		}
-		
+
 		// Find actual file path
 		filePath, _ := r.findBookFile(book.Hash)
 		if filePath != "" {
 			e.FilePath = filePath
 		}
-		
+
 		// Calculate percentage
 		if len(e.Progress) >= 2 && e.Progress[1] > 0 {
 			e.ProgressPct = (e.Progress[0] * 100) / e.Progress[1]
 		}
-		
+
 		// Consider "currently reading" if progress > 0 and < 100%
 		e.IsCurrentlyReading = e.ProgressPct > 0 && e.ProgressPct < 100
-		
+
 		enriched = append(enriched, e)
 	}
-	
+
 	// Sort by most recently updated
 	sort.Slice(enriched, func(i, j int) bool {
 		return enriched[i].UpdatedAt > enriched[j].UpdatedAt
 	})
-	
+
 	return enriched, nil
 }
 
@@ -217,13 +217,13 @@ func (r *ReadestLibrary) GetBookByHash(hash string) (*ReadestBookEnriched, error
 	if err != nil {
 		return nil, err
 	}
-	
+
 	for _, book := range books {
 		if book.Hash == hash {
 			e := &ReadestBookEnriched{
 				ReadestBook: book,
 			}
-			
+
 			config, _ := r.ReadBookConfig(book.Hash)
 			if config != nil {
 				e.Config = config
@@ -231,21 +231,21 @@ func (r *ReadestLibrary) GetBookByHash(hash string) (*ReadestBookEnriched, error
 					e.Progress = config.Progress
 				}
 			}
-			
+
 			filePath, _ := r.findBookFile(book.Hash)
 			if filePath != "" {
 				e.FilePath = filePath
 			}
-			
+
 			if len(e.Progress) >= 2 && e.Progress[1] > 0 {
 				e.ProgressPct = (e.Progress[0] * 100) / e.Progress[1]
 			}
 			e.IsCurrentlyReading = e.ProgressPct > 0 && e.ProgressPct < 100
-			
+
 			return e, nil
 		}
 	}
-	
+
 	return nil, fmt.Errorf("book with hash %s not found", hash)
 }
 
@@ -255,18 +255,18 @@ func (r *ReadestLibrary) GetLastSyncTime() (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	
+
 	var latest int64
 	for _, book := range books {
 		if book.UpdatedAt > latest {
 			latest = book.UpdatedAt
 		}
 	}
-	
+
 	if latest == 0 {
 		return time.Time{}, nil
 	}
-	
+
 	// Readest timestamps are in milliseconds
 	return time.UnixMilli(latest), nil
 }
@@ -277,12 +277,12 @@ func (r *ReadestLibrary) GetStats() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	total := len(books)
 	withProgress := 0
 	currentlyReading := 0
 	finished := 0
-	
+
 	for _, book := range books {
 		if len(book.Progress) >= 2 && book.Progress[0] > 0 {
 			withProgress++
@@ -294,9 +294,9 @@ func (r *ReadestLibrary) GetStats() (map[string]interface{}, error) {
 			}
 		}
 	}
-	
+
 	lastSync, _ := r.GetLastSyncTime()
-	
+
 	return map[string]interface{}{
 		"total_books":       total,
 		"with_progress":     withProgress,

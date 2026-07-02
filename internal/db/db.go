@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/bernard/library/internal/models"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 type DB struct {
@@ -22,7 +22,7 @@ func New(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
 
-	conn, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	conn, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
@@ -113,6 +113,14 @@ func (db *DB) migrate() error {
 		ALTER TABLE items ADD COLUMN description TEXT DEFAULT ''
 	`)
 	if descErr != nil && !strings.Contains(descErr.Error(), "duplicate column") {
+		return nil
+	}
+
+	// purpose column (e.g. learning, reference, research, interview-prep, ...)
+	_, purposeErr := db.conn.Exec(`
+		ALTER TABLE items ADD COLUMN purpose TEXT DEFAULT ''
+	`)
+	if purposeErr != nil && !strings.Contains(purposeErr.Error(), "duplicate column") {
 		return nil
 	}
 
@@ -217,8 +225,8 @@ func toFTSQuery(input string) string {
 
 func (db *DB) UpsertItem(item *models.Item) error {
 	query := `
-	INSERT INTO items (title, authors, year, path, filename, type, category, tags, description, size, added_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	INSERT INTO items (title, authors, year, path, filename, type, category, tags, purpose, description, size, added_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	ON CONFLICT(path) DO UPDATE SET
 		title = excluded.title,
 		authors = excluded.authors,
@@ -227,12 +235,13 @@ func (db *DB) UpsertItem(item *models.Item) error {
 		type = excluded.type,
 		category = excluded.category,
 		tags = excluded.tags,
+		purpose = excluded.purpose,
 		description = excluded.description,
 		size = excluded.size,
 		updated_at = CURRENT_TIMESTAMP
 	`
 	result, err := db.conn.Exec(query, item.Title, item.Authors, item.Year,
-		item.Path, item.Filename, item.Type, item.Category, item.Tags, item.Description, item.Size)
+		item.Path, item.Filename, item.Type, item.Category, item.Tags, item.Purpose, item.Description, item.Size)
 	if err != nil {
 		return err
 	}
@@ -262,9 +271,9 @@ func (db *DB) syncItemTags(itemID int64, tagsCSV string) {
 
 func (db *DB) GetItem(id int64) (*models.Item, error) {
 	item := &models.Item{}
-	err := db.conn.QueryRow(`SELECT id, title, authors, year, path, filename, type, category, tags, description, size, added_at, updated_at FROM items WHERE id = ?`, id).Scan(
+	err := db.conn.QueryRow(`SELECT id, title, authors, year, path, filename, type, category, tags, purpose, description, size, added_at, updated_at FROM items WHERE id = ?`, id).Scan(
 		&item.ID, &item.Title, &item.Authors, &item.Year, &item.Path, &item.Filename,
-		&item.Type, &item.Category, &item.Tags, &item.Description, &item.Size, &item.AddedAt, &item.UpdatedAt)
+		&item.Type, &item.Category, &item.Tags, &item.Purpose, &item.Description, &item.Size, &item.AddedAt, &item.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -283,13 +292,13 @@ func (db *DB) Search(q models.SearchQuery) (*models.SearchResult, error) {
 	args := []interface{}{}
 
 	if q.Q != "" {
+		like := "%" + q.Q + "%"
 		if db.fts {
-			where = append(where, "id IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?)")
-			args = append(args, toFTSQuery(q.Q))
+			where = append(where, "(id IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?) OR purpose LIKE ?)")
+			args = append(args, toFTSQuery(q.Q), like)
 		} else {
-			where = append(where, "(title LIKE ? OR authors LIKE ? OR filename LIKE ? OR description LIKE ?)")
-			like := "%" + q.Q + "%"
-			args = append(args, like, like, like, like)
+			where = append(where, "(title LIKE ? OR authors LIKE ? OR filename LIKE ? OR description LIKE ? OR purpose LIKE ?)")
+			args = append(args, like, like, like, like, like)
 		}
 	}
 	if q.Type != "" {
@@ -303,6 +312,10 @@ func (db *DB) Search(q models.SearchQuery) (*models.SearchResult, error) {
 	if q.Tag != "" {
 		where = append(where, "id IN (SELECT item_id FROM item_tags WHERE tag = ?)")
 		args = append(args, q.Tag)
+	}
+	if q.Purpose != "" {
+		where = append(where, "purpose = ?")
+		args = append(args, q.Purpose)
 	}
 	if q.Year > 0 {
 		where = append(where, "year = ?")
@@ -327,7 +340,7 @@ func (db *DB) Search(q models.SearchQuery) (*models.SearchResult, error) {
 		orderClause = strings.Replace(orderClause, "DESC", "ASC", 1)
 	}
 
-	selectCols := "id, title, authors, year, path, filename, type, category, tags, description, size, added_at, updated_at"
+	selectCols := "id, title, authors, year, path, filename, type, category, tags, purpose, description, size, added_at, updated_at"
 
 	var total int
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM items %s", whereClause)
@@ -350,7 +363,7 @@ func (db *DB) Search(q models.SearchQuery) (*models.SearchResult, error) {
 		var item models.Item
 		if err := rows.Scan(
 			&item.ID, &item.Title, &item.Authors, &item.Year, &item.Path, &item.Filename,
-			&item.Type, &item.Category, &item.Tags, &item.Description, &item.Size, &item.AddedAt, &item.UpdatedAt,
+			&item.Type, &item.Category, &item.Tags, &item.Purpose, &item.Description, &item.Size, &item.AddedAt, &item.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -416,7 +429,7 @@ func (db *DB) GetStats() (*models.Stats, error) {
 		stats.ByYear[y] = n
 	}
 
-	recentRows, err := db.conn.Query("SELECT id, title, authors, year, path, filename, type, category, tags, description, size, added_at, updated_at FROM items ORDER BY added_at DESC LIMIT 10")
+	recentRows, err := db.conn.Query("SELECT id, title, authors, year, path, filename, type, category, tags, purpose, description, size, added_at, updated_at FROM items ORDER BY added_at DESC LIMIT 10")
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +438,7 @@ func (db *DB) GetStats() (*models.Stats, error) {
 		var item models.Item
 		recentRows.Scan(
 			&item.ID, &item.Title, &item.Authors, &item.Year, &item.Path, &item.Filename,
-			&item.Type, &item.Category, &item.Tags, &item.Description, &item.Size, &item.AddedAt, &item.UpdatedAt,
+			&item.Type, &item.Category, &item.Tags, &item.Purpose, &item.Description, &item.Size, &item.AddedAt, &item.UpdatedAt,
 		)
 		stats.RecentAdded = append(stats.RecentAdded, item)
 	}
@@ -465,8 +478,80 @@ func (db *DB) GetTags() ([]models.Tag, error) {
 	return result, nil
 }
 
+func (db *DB) GetPurposes() ([]models.Tag, error) {
+	rows, err := db.conn.Query("SELECT purpose, COUNT(*) as cnt FROM items WHERE purpose != '' GROUP BY purpose ORDER BY cnt DESC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []models.Tag
+	for rows.Next() {
+		var t models.Tag
+		rows.Scan(&t.Name, &t.Count)
+		result = append(result, t)
+	}
+	return result, nil
+}
+
 func (db *DB) DeleteItem(id int64) error {
 	_, err := db.conn.Exec("DELETE FROM items WHERE id = ?", id)
+	return err
+}
+
+// UpdateItem applies a partial update to an item's editable metadata.
+// Only non-nil fields in u are applied. Tags are re-synced to the junction
+// table and FTS is kept in sync by the existing AFTER UPDATE trigger.
+func (db *DB) UpdateItem(id int64, u models.ItemUpdate) error {
+	sets := []string{}
+	args := []interface{}{}
+	if u.Title != nil {
+		sets = append(sets, "title = ?")
+		args = append(args, *u.Title)
+	}
+	if u.Authors != nil {
+		sets = append(sets, "authors = ?")
+		args = append(args, *u.Authors)
+	}
+	if u.Year != nil {
+		sets = append(sets, "year = ?")
+		args = append(args, *u.Year)
+	}
+	if u.Category != nil {
+		sets = append(sets, "category = ?")
+		args = append(args, *u.Category)
+	}
+	if u.Tags != nil {
+		sets = append(sets, "tags = ?")
+		args = append(args, *u.Tags)
+	}
+	if u.Purpose != nil {
+		sets = append(sets, "purpose = ?")
+		args = append(args, *u.Purpose)
+	}
+	if u.Description != nil {
+		sets = append(sets, "description = ?")
+		args = append(args, *u.Description)
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	sets = append(sets, "updated_at = CURRENT_TIMESTAMP")
+	args = append(args, id)
+	query := "UPDATE items SET " + strings.Join(sets, ", ") + " WHERE id = ?"
+	if _, err := db.conn.Exec(query, args...); err != nil {
+		return err
+	}
+	if u.Tags != nil {
+		db.syncItemTags(id, *u.Tags)
+	}
+	return nil
+}
+
+// UpdateItemPath updates the on-disk path/filename after a file has been moved
+// by the organize tool. The FTS AFTER UPDATE trigger keeps search in sync.
+func (db *DB) UpdateItemPath(id int64, path, filename string) error {
+	_, err := db.conn.Exec("UPDATE items SET path = ?, filename = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", path, filename, id)
 	return err
 }
 
@@ -861,7 +946,7 @@ func (db *DB) UpdateProgressFromReadest(itemID int64, readestHash string, curren
 
 // GetAllItems returns all items for matching
 func (db *DB) GetAllItems() ([]models.Item, error) {
-	rows, err := db.conn.Query("SELECT id, title, authors, year, path, filename, type, category, tags, description, size, added_at, updated_at FROM items")
+	rows, err := db.conn.Query("SELECT id, title, authors, year, path, filename, type, category, tags, purpose, description, size, added_at, updated_at FROM items")
 	if err != nil {
 		return nil, err
 	}
@@ -870,7 +955,7 @@ func (db *DB) GetAllItems() ([]models.Item, error) {
 	var items []models.Item
 	for rows.Next() {
 		var item models.Item
-		if err := rows.Scan(&item.ID, &item.Title, &item.Authors, &item.Year, &item.Path, &item.Filename, &item.Type, &item.Category, &item.Tags, &item.Description, &item.Size, &item.AddedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Title, &item.Authors, &item.Year, &item.Path, &item.Filename, &item.Type, &item.Category, &item.Tags, &item.Purpose, &item.Description, &item.Size, &item.AddedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

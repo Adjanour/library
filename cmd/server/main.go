@@ -20,6 +20,7 @@ import (
 func main() {
 	port := flag.Int("port", 8080, "server port")
 	scan := flag.Bool("scan", false, "scan and index files before starting")
+	force := flag.Bool("force", false, "force re-parse all files during scan")
 	flag.Parse()
 
 	homeDir, _ := os.UserHomeDir()
@@ -31,16 +32,18 @@ func main() {
 	}
 	defer database.Close()
 
+	scanDirs := []string{
+		filepath.Join(homeDir, "Documents"),
+		filepath.Join(homeDir, "Downloads"),
+		filepath.Join(homeDir, "Books"),
+	}
+
 	if *scan {
-		dirs := []string{
-			filepath.Join(homeDir, "Documents"),
-			filepath.Join(homeDir, "Downloads"),
-		}
-		sc := scanner.New(database, dirs)
+		sc := scanner.New(database, scanDirs)
 		fmt.Println("Scanning for books and papers...")
-		indexed, err := sc.ScanAll(func(current, total int, filename string) {
+		indexed, err := sc.ScanAllOpts(func(current, total int, filename string) {
 			fmt.Printf("\r[%d/%d] %s", current, total, filename)
-		})
+		}, *force)
 		if err != nil {
 			log.Printf("scan error: %v", err)
 		}
@@ -49,7 +52,7 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	handler := api.NewHandler(database)
+	handler := api.NewHandler(database, scanDirs)
 	handler.RegisterRoutes(mux)
 
 	readingHandler := api.NewReadingHandler(database)
