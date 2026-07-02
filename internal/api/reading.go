@@ -72,8 +72,15 @@ func (h *ReadingHandler) handleProgressItem(w http.ResponseWriter, r *http.Reque
 	case "GET":
 		progress, err := h.db.GetReadingProgress(id)
 		if err != nil {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
+			// Return an empty default instead of 404 — no progress yet
+			// is a normal state, not an error worth logging in console.
+			progress = &models.ReadingProgress{
+				ItemID:         id,
+				Status:         "unread",
+				ProgressPercent: 0,
+				CurrentPage:    0,
+				TotalPages:     0,
+			}
 		}
 		writeJSON(w, progress)
 

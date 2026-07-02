@@ -9,6 +9,8 @@
         onClose: () => void;
     } = $props();
 
+    console.log(item.filename);
+
     let viewer: HTMLDivElement;
     let rendition: any = null;
     let book: any = null;
@@ -37,8 +39,17 @@
             // Dynamic import — epub.js touches window/document, must not
             // be imported at the top level (SSR-safe + lazy-loaded).
             const ePub = (await import("epubjs")).default;
-            const url = `/api/file/${item.id}`;
-            book = ePub(url);
+
+            // Fetch the EPUB as an ArrayBuffer and pass it directly to epub.js.
+            // This avoids epub.js's URL-based loader which falls back to
+            // "directory mode" (requesting META-INF/container.xml relative
+            // to the base URL) when it can't stream the ZIP over HTTP Range
+            // requests. An in-memory buffer is the most robust approach.
+            const response = await fetch(`/api/file/${item.id}`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const buffer = await response.arrayBuffer();
+            book = ePub(buffer);
+
             rendition = book.renderTo(viewer, {
                 width: "100%",
                 height: "100%",
