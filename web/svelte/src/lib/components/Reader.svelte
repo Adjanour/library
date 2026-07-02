@@ -55,6 +55,8 @@
                 height: "100%",
                 spread: "none",
                 flow: "paginated",
+                allowScriptedContent: true,
+                allowPopups: true,
             });
             await rendition.display();
             ready = true;
