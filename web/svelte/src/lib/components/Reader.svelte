@@ -39,13 +39,14 @@
         flow: "paginated" as "paginated" | "scrolled",
     });
 
-    // Load saved settings
-    $effect(() => {
+    // Load saved settings once on mount (NOT in $effect — that would
+    // read + write `settings` in the same effect → infinite loop).
+    function loadSettings() {
         try {
             const saved = localStorage.getItem("library:epub-settings");
             if (saved) settings = { ...settings, ...JSON.parse(saved) };
         } catch {}
-    });
+    }
 
     function saveSettings() {
         try {
@@ -129,6 +130,7 @@
 
     onMount(async () => {
         window.addEventListener("keydown", onKey);
+        loadSettings();
         if (!viewer) return;
 
         try {
