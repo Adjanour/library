@@ -9,15 +9,105 @@
         onClose: () => void;
     } = $props();
 
-    console.log(item.filename);
-
     let viewer: HTMLDivElement;
     let rendition: any = null;
     let book: any = null;
     let ready = $state(false);
     let error = $state("");
     let currentPercent = $state(0);
+    let showSettings = $state(false);
 
+    // ── Reader settings (persisted in localStorage) ──────────────────────
+    const FONT_SIZES = [80, 90, 100, 110, 125, 150, 175, 200];
+    const FONT_FAMILIES: Record<string, string> = {
+        default: "",
+        serif: "Georgia, 'Times New Roman', serif",
+        sans: "'Helvetica Neue', Arial, sans-serif",
+        mono: "'JetBrains Mono', 'Courier New', monospace",
+    };
+    const THEMES: Record<string, { bg: string; fg: string }> = {
+        light: { bg: "#ffffff", fg: "#1a1a1a" },
+        sepia: { bg: "#f4ecd8", fg: "#5b4636" },
+        dark: { bg: "#1e1e1e", fg: "#d4d4d4" },
+    };
+
+    let settings = $state({
+        fontSize: 100,
+        fontFamily: "default",
+        theme: "light",
+        spread: "none" as "none" | "both",
+        flow: "paginated" as "paginated" | "scrolled",
+    });
+
+    // Load saved settings
+    $effect(() => {
+        try {
+            const saved = localStorage.getItem("library:epub-settings");
+            if (saved) settings = { ...settings, ...JSON.parse(saved) };
+        } catch {}
+    });
+
+    function saveSettings() {
+        try {
+            localStorage.setItem("library:epub-settings", JSON.stringify(settings));
+        } catch {}
+    }
+
+    // ── Settings actions ─────────────────────────────────────────────────
+    function changeFontSize(delta: number) {
+        const idx = FONT_SIZES.indexOf(settings.fontSize);
+        const nextIdx = Math.max(0, Math.min(FONT_SIZES.length - 1, idx + delta));
+        settings.fontSize = FONT_SIZES[nextIdx];
+        applyFontSize();
+        saveSettings();
+    }
+
+    function changeFontFamily(fam: string) {
+        settings.fontFamily = fam;
+        applyFontFamily();
+        saveSettings();
+    }
+
+    function changeTheme(theme: string) {
+        settings.theme = theme;
+        applyTheme();
+        saveSettings();
+    }
+
+    function toggleSpread() {
+        settings.spread = settings.spread === "none" ? "both" : "none";
+        applySpread();
+        saveSettings();
+    }
+
+    function toggleFlow() {
+        settings.flow = settings.flow === "paginated" ? "scrolled" : "paginated";
+        applyFlow();
+        saveSettings();
+    }
+
+    // ── Apply settings to rendition ──────────────────────────────────────
+    function applyFontSize() {
+        rendition?.themes.fontSize(`${settings.fontSize}%`);
+    }
+    function applyFontFamily() {
+        const fam = FONT_FAMILIES[settings.fontFamily];
+        if (fam) rendition?.themes.font(fam);
+    }
+    function applyTheme() {
+        rendition?.themes.select(settings.theme);
+        // Update the viewer background to match
+        const t = THEMES[settings.theme];
+        if (viewer) viewer.style.background = t.bg;
+    }
+    function applySpread() {
+        rendition?.spread(settings.spread);
+    }
+    function applyFlow() {
+        rendition?.flow(settings.flow);
+    }
+
+    // ── Navigation ───────────────────────────────────────────────────────
     function next() {
         rendition?.next();
     }
@@ -28,7 +118,13 @@
     function onKey(e: KeyboardEvent) {
         if (e.key === "ArrowRight") next();
         if (e.key === "ArrowLeft") prev();
-        if (e.key === "Escape") onClose();
+        if (e.key === "Escape") {
+            if (showSettings) {
+                showSettings = false;
+            } else {
+                onClose();
+            }
+        }
     }
 
     onMount(async () => {
@@ -36,15 +132,8 @@
         if (!viewer) return;
 
         try {
-            // Dynamic import — epub.js touches window/document, must not
-            // be imported at the top level (SSR-safe + lazy-loaded).
             const ePub = (await import("epubjs")).default;
 
-            // Fetch the EPUB as an ArrayBuffer and pass it directly to epub.js.
-            // This avoids epub.js's URL-based loader which falls back to
-            // "directory mode" (requesting META-INF/container.xml relative
-            // to the base URL) when it can't stream the ZIP over HTTP Range
-            // requests. An in-memory buffer is the most robust approach.
             const response = await fetch(`/api/file/${item.id}`);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const buffer = await response.arrayBuffer();
@@ -53,13 +142,32 @@
             rendition = book.renderTo(viewer, {
                 width: "100%",
                 height: "100%",
-                spread: "none",
-                flow: "paginated",
+                spread: settings.spread,
+                flow: settings.flow,
                 allowScriptedContent: true,
                 allowPopups: true,
             });
+
+            // Register themes
+            for (const [name, t] of Object.entries(THEMES)) {
+                rendition.themes.register(name, {
+                    body: { background: t.bg, color: t.fg },
+                    p: { color: `${t.fg} !important` },
+                    a: { color: `${t.fg} !important` },
+                });
+            }
+            rendition.themes.select(settings.theme);
+
             await rendition.display();
             ready = true;
+
+            // Apply font settings after display
+            applyFontSize();
+            applyFontFamily();
+
+            // Set viewer background
+            const t = THEMES[settings.theme];
+            viewer.style.background = t.bg;
 
             book.ready.then(() => {
                 rendition.on("relocated", (location: any) => {
@@ -82,89 +190,127 @@
 
 <div class="fixed inset-0 bg-surface-0 z-40 flex flex-col">
     <!-- Reader header -->
-    <div
-        class="flex items-center gap-3 px-4 py-2 border-b border-border bg-surface-1 shrink-0"
-    >
-        <button
-            class="p-1.5 rounded hover:bg-surface-3 transition-colors"
-            title="Close (Esc)"
-            onclick={onClose}
-        >
-            <svg
-                viewBox="0 0 24 24"
-                width="18"
-                height="18"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                ><line x1="18" y1="6" x2="6" y2="18" /><line
-                    x1="6"
-                    y1="6"
-                    x2="18"
-                    y2="18"
-                /></svg
-            >
+    <div class="flex items-center gap-2 px-4 py-2 border-b border-border bg-surface-1 shrink-0">
+        <button class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0" title="Close (Esc)" onclick={onClose}>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
+                ><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
         </button>
         <div class="min-w-0 flex-1">
             <div class="text-sm font-medium truncate">{item.title}</div>
-            {#if ready}<div class="text-[10px] text-text-muted">
-                    {currentPercent}% read
-                </div>{/if}
+            {#if ready}<div class="text-[10px] text-text-muted">{currentPercent}% read</div>{/if}
         </div>
+
+        <!-- Settings gear -->
         <button
-            class="p-1.5 rounded hover:bg-surface-3 transition-colors"
-            title="Previous"
-            onclick={prev}
+            class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0"
+            class:bg-surface-3={showSettings}
+            title="Settings"
+            onclick={() => (showSettings = !showSettings)}
         >
-            <svg
-                viewBox="0 0 24 24"
-                width="18"
-                height="18"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"><polyline points="15 18 9 12 15 6" /></svg
-            >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
+                ><circle cx="12" cy="12" r="3" /><path
+                    d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" /></svg>
         </button>
-        <button
-            class="p-1.5 rounded hover:bg-surface-3 transition-colors"
-            title="Next"
-            onclick={next}
-        >
-            <svg
-                viewBox="0 0 24 24"
-                width="18"
-                height="18"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"><polyline points="9 18 15 12 9 6" /></svg
-            >
+
+        <div class="w-px h-5 bg-border mx-1 shrink-0"></div>
+
+        <button class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0" title="Previous (←)" onclick={prev}>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
+                ><polyline points="15 18 9 12 15 6" /></svg>
+        </button>
+        <button class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0" title="Next (→)" onclick={next}>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
+                ><polyline points="9 18 15 12 9 6" /></svg>
         </button>
     </div>
+
+    <!-- Settings panel (collapsible) -->
+    {#if showSettings}
+        <div class="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-2.5 border-b border-border bg-surface-1 shrink-0 text-xs">
+            <!-- Font size -->
+            <div class="flex items-center gap-1.5">
+                <span class="text-text-muted text-[10px] uppercase tracking-wider">Font</span>
+                <button class="w-6 h-6 flex items-center justify-center rounded bg-surface-2 hover:bg-surface-3 transition-colors disabled:opacity-30"
+                    onclick={() => changeFontSize(-1)} disabled={settings.fontSize === FONT_SIZES[0]} title="Smaller font">A<span class="text-[8px]">−</span></button>
+                <span class="w-10 text-center text-text-secondary tabular-nums">{settings.fontSize}%</span>
+                <button class="w-6 h-6 flex items-center justify-center rounded bg-surface-2 hover:bg-surface-3 transition-colors disabled:opacity-30"
+                    onclick={() => changeFontSize(1)} disabled={settings.fontSize === FONT_SIZES[FONT_SIZES.length - 1]} title="Larger font">A<span class="text-[10px]">+</span></button>
+            </div>
+
+            <div class="w-px h-5 bg-border shrink-0"></div>
+
+            <!-- Font family -->
+            <div class="flex items-center gap-1.5">
+                <span class="text-text-muted text-[10px] uppercase tracking-wider">Face</span>
+                <select class="bg-surface-2 border border-border rounded px-2 py-1 text-xs text-text-primary outline-none cursor-pointer hover:bg-surface-3 transition-colors"
+                    value={settings.fontFamily} onchange={(e) => changeFontFamily(e.currentTarget.value)}>
+                    <option value="default">Default</option>
+                    <option value="serif">Serif</option>
+                    <option value="sans">Sans-serif</option>
+                    <option value="mono">Monospace</option>
+                </select>
+            </div>
+
+            <div class="w-px h-5 bg-border shrink-0"></div>
+
+            <!-- Theme -->
+            <div class="flex items-center gap-1.5">
+                <span class="text-text-muted text-[10px] uppercase tracking-wider">Theme</span>
+                <div class="flex gap-1">
+                    {#each Object.entries(THEMES) as [name, t]}
+                        <button class="w-6 h-6 rounded border-2 transition-transform hover:scale-110"
+                            style="background: {t.bg}; border-color: {settings.theme === name ? 'var(--color-accent)' : 'transparent'}"
+                            title={name.charAt(0).toUpperCase() + name.slice(1)}
+                            onclick={() => changeTheme(name)}></button>
+                    {/each}
+                </div>
+            </div>
+
+            <div class="w-px h-5 bg-border shrink-0"></div>
+
+            <!-- Layout: single / double page -->
+            <div class="flex items-center gap-1.5">
+                <span class="text-text-muted text-[10px] uppercase tracking-wider">Pages</span>
+                <div class="flex bg-surface-2 rounded border border-border overflow-hidden">
+                    <button class="px-2 py-1 transition-colors"
+                        class:bg-accent={settings.spread === "none"} class:text-white={settings.spread === "none"} class:text-text-secondary={settings.spread !== "none"}
+                        onclick={() => { if (settings.spread !== "none") toggleSpread(); }} title="Single page">1</button>
+                    <button class="px-2 py-1 transition-colors"
+                        class:bg-accent={settings.spread === "both"} class:text-white={settings.spread === "both"} class:text-text-secondary={settings.spread !== "both"}
+                        onclick={() => { if (settings.spread !== "both") toggleSpread(); }} title="Two pages">2</button>
+                </div>
+            </div>
+
+            <div class="w-px h-5 bg-border shrink-0"></div>
+
+            <!-- Flow: paginated / scrolled -->
+            <div class="flex items-center gap-1.5">
+                <span class="text-text-muted text-[10px] uppercase tracking-wider">Scroll</span>
+                <div class="flex bg-surface-2 rounded border border-border overflow-hidden">
+                    <button class="px-2 py-1 transition-colors"
+                        class:bg-accent={settings.flow === "paginated"} class:text-white={settings.flow === "paginated"} class:text-text-secondary={settings.flow !== "paginated"}
+                        onclick={() => { if (settings.flow !== "paginated") toggleFlow(); }} title="Paginated">Pages</button>
+                    <button class="px-2 py-1 transition-colors"
+                        class:bg-accent={settings.flow === "scrolled"} class:text-white={settings.flow === "scrolled"} class:text-text-secondary={settings.flow !== "scrolled"}
+                        onclick={() => { if (settings.flow !== "scrolled") toggleFlow(); }} title="Continuous scroll">Scroll</button>
+                </div>
+            </div>
+        </div>
+    {/if}
 
     <!-- Progress bar -->
     {#if ready}
         <div class="h-0.5 bg-surface-2 shrink-0">
-            <div
-                class="h-full bg-accent transition-all"
-                style="width: {currentPercent}%"
-            ></div>
+            <div class="h-full bg-accent transition-all" style="width: {currentPercent}%"></div>
         </div>
     {/if}
 
     <!-- Viewer -->
     <div class="flex-1 relative">
         {#if error}
-            <div
-                class="flex items-center justify-center h-full text-error text-sm p-8 text-center"
-            >
-                {error}
-            </div>
+            <div class="flex items-center justify-center h-full text-error text-sm p-8 text-center">{error}</div>
         {:else if !ready}
-            <div
-                class="flex items-center justify-center h-full text-text-muted text-sm"
-            >
-                Loading EPUB…
-            </div>
+            <div class="flex items-center justify-center h-full text-text-muted text-sm">Loading EPUB…</div>
         {/if}
         <div bind:this={viewer} class="w-full h-full"></div>
     </div>
