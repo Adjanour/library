@@ -2,7 +2,7 @@
 
 A personal knowledge base for tracking books, papers, and reading progress. Scans your local Documents, Downloads, and Books directories, indexes metadata, and gives you a web UI to browse and manage everything.
 
-Integrates with [FocusD](https://github.com/nicholasgasior/focusd) to pull reading plans and sync completion status.
+Integrates with [FocusD](https://github.com/Adjanour/focusd) to pull reading plans and sync completion status.
 
 ## Features
 
