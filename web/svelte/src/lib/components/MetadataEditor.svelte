@@ -12,27 +12,24 @@
 
   let editing = $state(false);
   let saving = $state(false);
-  let form = $state({
-    title: item.title,
-    authors: item.authors,
-    year: item.year,
-    category: item.category,
-    purpose: item.purpose,
-    tags: item.tags,
-    description: item.description
-  });
+
+  function makeForm(it: Item) {
+    return {
+      title: it.title,
+      authors: it.authors,
+      year: it.year,
+      category: it.category,
+      purpose: it.purpose,
+      tags: it.tags,
+      description: it.description
+    };
+  }
+
+  let form = $state({ title: '', authors: '', year: 0, category: '', purpose: '', tags: '', description: '' });
 
   // Sync form when the selected item changes
   $effect(() => {
-    form = {
-      title: item.title,
-      authors: item.authors,
-      year: item.year,
-      category: item.category,
-      purpose: item.purpose,
-      tags: item.tags,
-      description: item.description
-    };
+    form = makeForm(item);
     editing = false;
   });
 
@@ -65,37 +62,37 @@
 {#if editing}
   <div class="space-y-2">
     <div>
-      <label class="text-[10px] text-text-muted">Title</label>
-      <input bind:value={form.title} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-sm" />
+      <label for="meta-title" class="text-[10px] text-text-muted">Title</label>
+      <input id="meta-title" bind:value={form.title} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-sm" />
     </div>
     <div>
-      <label class="text-[10px] text-text-muted">Authors</label>
-      <input bind:value={form.authors} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-sm" placeholder="Comma-separated" />
+      <label for="meta-authors" class="text-[10px] text-text-muted">Authors</label>
+      <input id="meta-authors" bind:value={form.authors} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-sm" placeholder="Comma-separated" />
     </div>
     <div class="grid grid-cols-2 gap-2">
       <div>
-        <label class="text-[10px] text-text-muted">Year</label>
-        <input type="number" bind:value={form.year} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-sm" />
+        <label for="meta-year" class="text-[10px] text-text-muted">Year</label>
+        <input id="meta-year" type="number" bind:value={form.year} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-sm" />
       </div>
       <div>
-        <label class="text-[10px] text-text-muted">Category</label>
-        <input bind:value={form.category} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-sm" />
+        <label for="meta-category" class="text-[10px] text-text-muted">Category</label>
+        <input id="meta-category" bind:value={form.category} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-sm" />
       </div>
     </div>
     <div>
-      <label class="text-[10px] text-text-muted">Purpose</label>
-      <select bind:value={form.purpose} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-sm">
+      <label for="meta-purpose" class="text-[10px] text-text-muted">Purpose</label>
+      <select id="meta-purpose" bind:value={form.purpose} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-sm">
         <option value="">None</option>
         {#each PURPOSES as p}<option value={p}>{p}</option>{/each}
       </select>
     </div>
     <div>
-      <label class="text-[10px] text-text-muted">Tags (comma-separated)</label>
-      <input bind:value={form.tags} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-sm" />
+      <label for="meta-tags" class="text-[10px] text-text-muted">Tags (comma-separated)</label>
+      <input id="meta-tags" bind:value={form.tags} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-sm" />
     </div>
     <div>
-      <label class="text-[10px] text-text-muted">Description</label>
-      <textarea bind:value={form.description} rows="3" class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-sm resize-none"></textarea>
+      <label for="meta-description" class="text-[10px] text-text-muted">Description</label>
+      <textarea id="meta-description" bind:value={form.description} rows="3" class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-sm resize-none"></textarea>
     </div>
     <div class="flex gap-2 justify-end">
       <button class="px-2.5 py-1 text-xs bg-surface-2 border border-border rounded hover:bg-surface-3 transition-colors" onclick={cancel}>Cancel</button>

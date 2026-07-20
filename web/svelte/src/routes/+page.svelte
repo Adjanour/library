@@ -28,11 +28,21 @@
   let theme = $state<'dark' | 'light'>(typeof window !== 'undefined'
     ? (localStorage.getItem('theme') as 'dark' | 'light') ||
       (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : 'dark');
+  let showPreviewPanel = $state(typeof window !== 'undefined'
+    ? localStorage.getItem('showPreviewPanel') !== 'false'
+    : true);
+  let itemsPerPage = $state(typeof window !== 'undefined'
+    ? parseInt(localStorage.getItem('itemsPerPage') || '20', 10)
+    : 20);
+  let middleWidth = $state(typeof window !== 'undefined'
+    ? parseInt(localStorage.getItem('middleWidth') || '420', 10)
+    : 420);
+  let isResizing = $state(false);
 
   async function search() {
     loading = true;
     try { const r = await api.search(query, { type: activeType || undefined, category: activeCategory || undefined,
-      tag: activeTag || undefined, purpose: activePurpose || undefined, sort: sortBy || undefined, page });
+      tag: activeTag || undefined, purpose: activePurpose || undefined, sort: sortBy || undefined, page, limit: itemsPerPage });
       items = r.items || []; total = r.total; totalPages = r.total_pages;
     } catch (e) { console.error(e); items = []; }
     loading = false;
@@ -53,6 +63,29 @@
   function selectPurpose(p: string) { activePurpose = p; page = 1; search(); }
   function toggleTheme() { theme = theme === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', theme); localStorage.setItem('theme', theme); }
+  function togglePreviewPanel() { showPreviewPanel = !showPreviewPanel;
+    localStorage.setItem('showPreviewPanel', String(showPreviewPanel)); }
+  function setItemsPerPage(n: number) { itemsPerPage = n; page = 1;
+    localStorage.setItem('itemsPerPage', String(n)); search(); }
+  function startResize(e: MouseEvent) {
+    e.preventDefault();
+    isResizing = true;
+    const startX = e.clientX;
+    const startWidth = middleWidth;
+    function onMove(ev: MouseEvent) {
+      const delta = ev.clientX - startX;
+      const newWidth = Math.max(280, Math.min(startWidth + delta, window.innerWidth - 320));
+      middleWidth = newWidth;
+    }
+    function onUp() {
+      isResizing = false;
+      localStorage.setItem('middleWidth', String(middleWidth));
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
   async function rescan() { loading = true;
     try { await api.scan(); await Promise.all([search(), loadSidebarData()]); } catch (e) { console.error(e); } loading = false; }
   async function onSaved(u: Item) { selectedItem = u; items = items.map((i) => (i.id === u.id ? u : i)); await loadSidebarData(); }
@@ -78,6 +111,7 @@
     if (e.key === 'g') view = 'grid';
     if (e.key === 'l') view = 'list';
     if (e.key === 'b') { view = 'reading'; loadDashboard(); }
+    if (e.key === 'p') togglePreviewPanel();
     if (e.key === '?') showKeybindings = true;
   }
   $effect(() => { document.documentElement.setAttribute('data-theme', theme); });
@@ -93,15 +127,23 @@
   </div>
 
   <!-- Middle: List -->
-  <div class="w-[420px] border-r border-border bg-surface-1 shrink-0 flex flex-col">
-    <Toolbar {query} {view} {theme} {loading}
+  <div class="border-r border-border bg-surface-1 shrink-0 flex flex-col" class:flex-1={!showPreviewPanel} style={showPreviewPanel ? `width: ${middleWidth}px` : ''}>
+    <Toolbar {query} {view} {theme} {loading} {showPreviewPanel}
       onQueryInput={handleQueryInput} onSearch={handleSearch}
       onViewChange={(v) => { view = v; if (v === 'reading') loadDashboard(); }}
-      onToggleTheme={toggleTheme} onRescan={rescan} onShowKeybindings={() => (showKeybindings = true)} />
+      onToggleTheme={toggleTheme} onRescan={rescan} onShowKeybindings={() => (showKeybindings = true)}
+      onTogglePreview={togglePreviewPanel} />
     <div class="px-3 py-1.5 border-b border-border flex items-center gap-2">
       <select bind:value={sortBy} onchange={() => { page = 1; search(); }} class="bg-surface-2 border border-border rounded px-2 py-1 text-xs text-text-secondary cursor-pointer">
         <option value="">Sort: Title</option><option value="year">Sort: Year</option>
         <option value="added">Sort: Recent</option><option value="size">Sort: Size</option>
+      </select>
+      <select bind:value={itemsPerPage} onchange={(e) => setItemsPerPage(parseInt((e.target as HTMLSelectElement).value, 10))} class="bg-surface-2 border border-border rounded px-2 py-1 text-xs text-text-secondary cursor-pointer">
+        <option value={10}>10 / page</option>
+        <option value={20}>20 / page</option>
+        <option value={40}>40 / page</option>
+        <option value={60}>60 / page</option>
+        <option value={100}>100 / page</option>
       </select>
       <div class="flex-1"></div>
       <span class="text-[10px] text-text-muted">{total} items</span>
@@ -134,54 +176,61 @@
     {/if}
   </div>
 
+  <!-- Resize handle -->
+  {#if showPreviewPanel}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="w-1 hover:w-1.5 bg-border hover:bg-accent cursor-col-resize shrink-0 transition-all" class:animate-pulse={isResizing} onmousedown={startResize}></div>
+  {/if}
 
   <!-- Right: Detail / Reading dashboard -->
-  <div class="flex-1 overflow-hidden bg-surface-0">
-    {#if view === 'reading' && dashboard}
-      <div class="p-6 max-w-4xl overflow-y-auto h-full">
-        <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" class="text-accent">
-            <path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
-          Reading Dashboard
-        </h2>
-        <div class="grid grid-cols-4 gap-3 mb-6">
-          <div class="bg-surface-1 border border-border rounded-lg p-3"><div class="text-2xl font-bold text-accent">{dashboard.total_read_books}</div><div class="text-[10px] text-text-muted uppercase">Finished</div></div>
-          <div class="bg-surface-1 border border-border rounded-lg p-3"><div class="text-2xl font-bold text-success">{dashboard.currently_reading.length}</div><div class="text-[10px] text-text-muted uppercase">Reading now</div></div>
-          <div class="bg-surface-1 border border-border rounded-lg p-3"><div class="text-2xl font-bold">{dashboard.today_reading_minutes}m</div><div class="text-[10px] text-text-muted uppercase">Today</div></div>
-          <div class="bg-surface-1 border border-border rounded-lg p-3"><div class="text-2xl font-bold">{dashboard.week_reading_minutes}m</div><div class="text-[10px] text-text-muted uppercase">This week</div></div>
+  {#if showPreviewPanel || (view === 'reading' && dashboard)}
+    <div class="flex-1 overflow-hidden bg-surface-0">
+      {#if view === 'reading' && dashboard}
+        <div class="p-6 max-w-4xl overflow-y-auto h-full">
+          <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" class="text-accent">
+              <path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+            Reading Dashboard
+          </h2>
+          <div class="grid grid-cols-4 gap-3 mb-6">
+            <div class="bg-surface-1 border border-border rounded-lg p-3"><div class="text-2xl font-bold text-accent">{dashboard.total_read_books}</div><div class="text-[10px] text-text-muted uppercase">Finished</div></div>
+            <div class="bg-surface-1 border border-border rounded-lg p-3"><div class="text-2xl font-bold text-success">{dashboard.currently_reading.length}</div><div class="text-[10px] text-text-muted uppercase">Reading now</div></div>
+            <div class="bg-surface-1 border border-border rounded-lg p-3"><div class="text-2xl font-bold">{dashboard.today_reading_minutes}m</div><div class="text-[10px] text-text-muted uppercase">Today</div></div>
+            <div class="bg-surface-1 border border-border rounded-lg p-3"><div class="text-2xl font-bold">{dashboard.week_reading_minutes}m</div><div class="text-[10px] text-text-muted uppercase">This week</div></div>
+          </div>
+          {#if dashboard.currently_reading.length > 0}
+            <h3 class="text-sm font-semibold mb-2">Currently Reading</h3>
+            <div class="space-y-2 mb-6">
+              {#each dashboard.currently_reading as cr}
+                <button class="w-full text-left bg-surface-1 border border-border rounded-lg p-3 hover:border-accent/50 transition-colors" onclick={() => { view = 'grid'; selectItem(cr.item); }}>
+                  <div class="flex items-center justify-between mb-1"><span class="text-sm font-medium truncate">{cr.item.title}</span><span class="text-xs text-text-muted">{cr.progress.progress_percent}%</span></div>
+                  <div class="h-1 bg-surface-3 rounded-full overflow-hidden"><div class="h-full bg-accent" style="width: {cr.progress.progress_percent}%"></div></div>
+                </button>
+              {/each}
+            </div>
+          {/if}
+          {#if dashboard.queue.length > 0}
+            <h3 class="text-sm font-semibold mb-2">Reading Queue</h3>
+            <div class="space-y-1">
+              {#each dashboard.queue as q}
+                <div class="flex items-center gap-2 text-sm bg-surface-1 border border-border rounded px-3 py-2">
+                  <span class="text-text-muted text-xs">#{q.priority}</span><span class="truncate flex-1">{q.title}</span><span class="text-xs text-text-muted">{q.author}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
         </div>
-        {#if dashboard.currently_reading.length > 0}
-          <h3 class="text-sm font-semibold mb-2">Currently Reading</h3>
-          <div class="space-y-2 mb-6">
-            {#each dashboard.currently_reading as cr}
-              <button class="w-full text-left bg-surface-1 border border-border rounded-lg p-3 hover:border-accent/50 transition-colors" onclick={() => { view = 'grid'; selectItem(cr.item); }}>
-                <div class="flex items-center justify-between mb-1"><span class="text-sm font-medium truncate">{cr.item.title}</span><span class="text-xs text-text-muted">{cr.progress.progress_percent}%</span></div>
-                <div class="h-1 bg-surface-3 rounded-full overflow-hidden"><div class="h-full bg-accent" style="width: {cr.progress.progress_percent}%"></div></div>
-              </button>
-            {/each}
-          </div>
-        {/if}
-        {#if dashboard.queue.length > 0}
-          <h3 class="text-sm font-semibold mb-2">Reading Queue</h3>
-          <div class="space-y-1">
-            {#each dashboard.queue as q}
-              <div class="flex items-center gap-2 text-sm bg-surface-1 border border-border rounded px-3 py-2">
-                <span class="text-text-muted text-xs">#{q.priority}</span><span class="truncate flex-1">{q.title}</span><span class="text-xs text-text-muted">{q.author}</span>
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {:else}
-      <DetailPanel item={selectedItem} progress={selectedProgress} sessions={selectedSessions} {activeSession}
-        onOpen={(item) => api.open(item.id)}
-        onDelete={(item) => { selectedItem = item; showDeleteModal = true; }}
-        onRead={(item) => (readingItem = item)}
-        onSaved={onSaved}
-        onProgressChanged={() => selectedItem && loadProgress(selectedItem)}
-        onSessionChanged={() => selectedItem && loadProgress(selectedItem)} />
-    {/if}
-  </div>
+      {:else}
+        <DetailPanel item={selectedItem} progress={selectedProgress} sessions={selectedSessions} {activeSession}
+          onOpen={(item) => api.open(item.id)}
+          onDelete={(item) => { selectedItem = item; showDeleteModal = true; }}
+          onRead={(item) => (readingItem = item)}
+          onSaved={onSaved}
+          onProgressChanged={() => selectedItem && loadProgress(selectedItem)}
+          onSessionChanged={() => selectedItem && loadProgress(selectedItem)} />
+      {/if}
+    </div>
+  {/if}
 </div>
 
 {#if readingItem}

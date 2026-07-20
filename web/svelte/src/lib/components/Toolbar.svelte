@@ -6,23 +6,27 @@
     view,
     theme,
     loading,
+    showPreviewPanel,
     onQueryInput,
     onSearch,
     onViewChange,
     onToggleTheme,
     onRescan,
-    onShowKeybindings
+    onShowKeybindings,
+    onTogglePreview
   }: {
     query: string;
     view: 'grid' | 'list' | 'reading';
     theme: 'dark' | 'light';
     loading: boolean;
+    showPreviewPanel: boolean;
     onQueryInput: (e: Event) => void;
     onSearch: (e: Event) => void;
     onViewChange: (v: 'grid' | 'list' | 'reading') => void;
     onToggleTheme: () => void;
     onRescan: () => void;
     onShowKeybindings: () => void;
+    onTogglePreview: () => void;
   } = $props();
 </script>
 
@@ -35,7 +39,7 @@
       Library
     </div>
 
-    <div class="flex-1" />
+    <div class="flex-1"></div>
 
     <!-- View toggles -->
     <div class="flex items-center gap-0.5">
@@ -50,7 +54,11 @@
       </button>
     </div>
 
-    <div class="w-px h-5 bg-border" />
+    <div class="w-px h-5 bg-border"></div>
+
+    <button class="p-1.5 rounded hover:bg-surface-3 transition-colors" title="Toggle preview panel (p)" class:bg-accent={showPreviewPanel} class:text-white={showPreviewPanel} onclick={onTogglePreview}>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+    </button>
 
     <button class="p-1.5 rounded hover:bg-surface-3 transition-colors" title="Rescan (R)" onclick={onRescan}>
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" class={loading ? 'animate-spin' : ''}><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>

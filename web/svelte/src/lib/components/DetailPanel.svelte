@@ -28,11 +28,12 @@
   } = $props();
 
   let editInput = $state({ percent: 0, page: 0, pages: 0 });
-  let infoCollapsed = $state(false);
+  let infoCollapsed = $state(true);
+  let epubCoverUrl = $state('');
 
   // Reset collapse state when item changes
   $effect(() => {
-    if (item) { infoCollapsed = false; }
+    if (item) { infoCollapsed = true; }
   });
 
   $effect(() => {
@@ -41,6 +42,31 @@
     } else if (item) {
       editInput = { percent: 0, page: 0, pages: 0 };
     }
+  });
+
+  // Load epub cover when item changes
+  $effect(() => {
+    epubCoverUrl = '';
+    if (!item) return;
+    const e = fileExt(item.filename);
+    if (e !== 'epub') return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const ePub = (await import('epubjs')).default;
+        const res = await fetch(`/api/file/${item.id}`);
+        if (!res.ok || cancelled) return;
+        const buf = await res.arrayBuffer();
+        if (cancelled) return;
+        const book = ePub(buf);
+        const url = await book.coverUrl();
+        if (!cancelled) epubCoverUrl = url || '';
+        book.destroy();
+      } catch {}
+    })();
+
+    return () => { cancelled = true; };
   });
 
   const previewUrl = $derived(item ? `/api/file/${item.id}` : '');
@@ -117,7 +143,7 @@
       {/if}
 
       <div class="text-[10px] text-text-muted mb-3 space-y-0.5">
-        <div class="truncate">{item.filename}</div>
+        <div class="truncate" title={item.path}>{item.path}</div>
         <div>{formatSize(item.size)} · added {new Date(item.added_at).toLocaleDateString()}</div>
       </div>
 
@@ -156,16 +182,16 @@
 
       <div class="grid grid-cols-3 gap-2 mb-3">
         <div>
-          <label class="text-[10px] text-text-muted">Percent</label>
-          <input type="number" min="0" max="100" bind:value={editInput.percent} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-xs" />
+          <label for="percent" class="text-[10px] text-text-muted">Percent</label>
+          <input id="percent" type="number" min="0" max="100" bind:value={editInput.percent} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-xs" />
         </div>
         <div>
-          <label class="text-[10px] text-text-muted">Page</label>
-          <input type="number" min="0" bind:value={editInput.page} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-xs" />
+          <label for="page" class="text-[10px] text-text-muted">Page</label>
+          <input id="page" type="number" min="0" bind:value={editInput.page} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-xs" />
         </div>
         <div>
-          <label class="text-[10px] text-text-muted">Total</label>
-          <input type="number" min="0" bind:value={editInput.pages} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-xs" />
+          <label for="total" class="text-[10px] text-text-muted">Total</label>
+          <input id="total" type="number" min="0" bind:value={editInput.pages} class="w-full bg-surface-2 border border-border rounded px-2 py-1 text-xs" />
         </div>
       </div>
 
@@ -197,6 +223,14 @@
     <div class="flex-1 overflow-hidden bg-surface-1">
       {#if ext === 'pdf'}
         <iframe src={previewUrl} class="w-full h-full" title="PDF preview"></iframe>
+      {:else if ext === 'epub' && epubCoverUrl}
+        <div class="flex flex-col items-center justify-center h-full p-6 gap-4">
+          <img src={epubCoverUrl} alt={item.title} class="max-h-[60%] max-w-full object-contain rounded shadow-lg" />
+          <div class="text-center">
+            <div class="text-sm font-medium">{item.title}</div>
+            <div class="text-xs text-text-muted mt-0.5">{item.authors || 'Unknown author'}</div>
+          </div>
+        </div>
       {:else if ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)}
         <div class="flex items-center justify-center h-full p-4">
           <img src={previewUrl} alt={item.title} class="max-w-full max-h-full object-contain" />

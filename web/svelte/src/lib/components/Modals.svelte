@@ -25,6 +25,7 @@
     ['R', 'Rescan library'],
     ['g / l', 'Grid / List view'],
     ['b', 'Reading dashboard'],
+    ['p', 'Toggle preview panel'],
     ['?', 'Toggle this help'],
     ['Esc', 'Close / Back'],
   ];

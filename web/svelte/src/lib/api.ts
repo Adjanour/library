@@ -125,7 +125,7 @@ async function put<T>(path: string, body: unknown): Promise<T> {
 }
 
 export const api = {
-  search: (q: string, opts?: { type?: string; category?: string; tag?: string; purpose?: string; sort?: string; page?: number }) => {
+  search: (q: string, opts?: { type?: string; category?: string; tag?: string; purpose?: string; sort?: string; page?: number; limit?: number }) => {
     const params = new URLSearchParams();
     if (q) params.set('q', q);
     if (opts?.type) params.set('type', opts.type);
@@ -134,6 +134,7 @@ export const api = {
     if (opts?.purpose) params.set('purpose', opts.purpose);
     if (opts?.sort) params.set('sort', opts.sort);
     if (opts?.page) params.set('page', String(opts.page));
+    if (opts?.limit) params.set('limit', String(opts.limit));
     return get<SearchResult>('/api/search?' + params);
   },
   stats: () => get<Stats>('/api/stats'),
