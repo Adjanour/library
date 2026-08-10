@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="book1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f8fafc"/>
+      <stop offset="100%" style="stop-color:#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="book2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fef3c7"/>
+      <stop offset="100%" style="stop-color:#fde68a"/>
+    </linearGradient>
+    <linearGradient id="book3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#dbeafe"/>
+      <stop offset="100%" style="stop-color:#93c5fd"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background circle -->
+  <rect x="0" y="0" width="512" height="512" rx="96" fill="url(#bg)"/>
+  
+  <!-- Book stack - left -->
+  <g transform="translate(100, 120)">
+    <!-- Bottom book -->
+    <rect x="0" y="180" width="120" height="24" rx="4" fill="#1e1b4b" opacity="0.3"/>
+    <rect x="4" y="184" width="112" height="16" rx="2" fill="url(#book1)"/>
+    
+    <!-- Middle book -->
+    <rect x="10" y="156" width="100" height="24" rx="4" fill="#1e1b4b" opacity="0.3"/>
+    <rect x="14" y="160" width="92" height="16" rx="2" fill="url(#book2)"/>
+    
+    <!-- Top book -->
+    <rect x="20" y="132" width="80" height="24" rx="4" fill="#1e1b4b" opacity="0.3"/>
+    <rect x="24" y="136" width="72" height="16" rx="2" fill="url(#book3)"/>
+  </g>
+  
+  <!-- Book stack - right -->
+  <g transform="translate(260, 100)">
+    <!-- Bottom book -->
+    <rect x="0" y="200" width="140" height="28" rx="4" fill="#1e1b4b" opacity="0.3"/>
+    <rect x="4" y="204" width="132" height="20" rx="2" fill="url(#book1)"/>
+    
+    <!-- Middle book -->
+    <rect x="15" y="172" width="110" height="28" rx="4" fill="#1e1b4b" opacity="0.3"/>
+    <rect x="19" y="176" width="102" height="20" rx="2" fill="url(#book3)"/>
+    
+    <!-- Top book (open) -->
+    <g transform="translate(25, 120)">
+      <!-- Left page -->
+      <path d="M0,52 L0,0 Q50,-10 100,0 L100,52 Q50,42 0,52" fill="url(#book1)" stroke="#cbd5e1" stroke-width="2"/>
+      <!-- Right page -->
+      <path d="M100,0 Q150,-10 200,0 L200,52 Q150,42 100,52" fill="url(#book1)" stroke="#cbd5e1" stroke-width="2"/>
+      <!-- Spine -->
+      <line x1="100" y1="0" x2="100" y2="52" stroke="#94a3b8" stroke-width="3"/>
+      <!-- Page lines -->
+      <line x1="20" y1="15" x2="80" y2="15" stroke="#e2e8f0" stroke-width="2"/>
+      <line x1="20" y1="25" x2="80" y2="25" stroke="#e2e8f0" stroke-width="2"/>
+      <line x1="20" y1="35" x2="80" y2="35" stroke="#e2e8f0" stroke-width="2"/>
+      <line x1="120" y1="15" x2="180" y2="15" stroke="#e2e8f0" stroke-width="2"/>
+      <line x1="120" y1="25" x2="180" y2="25" stroke="#e2e8f0" stroke-width="2"/>
+      <line x1="120" y1="35" x2="180" y2="35" stroke="#e2e8f0" stroke-width="2"/>
+    </g>
+  </g>
+  
+  <!-- Magnifying glass -->
+  <g transform="translate(320, 320)">
+    <circle cx="40" cy="40" r="35" fill="none" stroke="#fbbf24" stroke-width="8"/>
+    <line x1="66" y1="66" x2="90" y2="90" stroke="#fbbf24" stroke-width="10" stroke-linecap="round"/>
+  </g>
+</svg>

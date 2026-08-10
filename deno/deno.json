@@ -1,10 +1,14 @@
 {
+  "name": "library",
   "version": "1.0.0",
+  "exports": "./src/main.ts",
   "tasks": {
-    "dev": "deno run -A --watch src/main.ts",
-    "start": "deno run -A src/main.ts",
-    "test": "deno test -A",
-    "check": "deno check src/**/*.ts"
+    "dev": "deno run --allow-all --watch src/main.ts",
+    "start": "deno run --allow-all src/main.ts",
+    "test": "deno test --allow-all",
+    "check": "deno check src/**/*.ts",
+    "desktop": "deno desktop --allow-all --include ../web/static src/main.ts",
+    "build:frontend": "cd ../web/svelte && npm run build"
   },
   "imports": {
     "hono": "npm:hono@^4",
@@ -16,5 +20,18 @@
   "compilerOptions": {
     "strict": true,
     "noUncheckedIndexedAccess": true
+  },
+  "desktop": {
+    "app": {
+      "name": "Library",
+      "identifier": "com.bernard.library",
+      "icons": {
+        "linux": "./icon.png"
+      }
+    },
+    "backend": "webview",
+    "output": {
+      "linux": "../dist/app"
+    }
   }
 }

@@ -4,6 +4,10 @@ import type {
   CategoryCount,
   Item,
   ItemUpdate,
+  ReadingDashboard,
+  ReadingProgress,
+  ReadingQueueItem,
+  ReadingSession,
   SearchQuery,
   SearchResult,
   Stats,
@@ -418,8 +422,161 @@ export class DB {
     }
   }
 
+  getAllPaths(): string[] {
+    const rows = this.conn.prepare("SELECT path FROM items").all() as { path: string }[];
+    return rows.map((r) => r.path);
+  }
+
+  upsertItem(item: Item): Result<void> {
+    return fromTryCatch(() => {
+      this.conn.prepare(`
+        INSERT INTO items (title, authors, year, path, filename, type, category, tags, purpose, description, size, added_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT(path) DO UPDATE SET
+          title = excluded.title, authors = excluded.authors, year = excluded.year,
+          filename = excluded.filename, type = excluded.type, category = excluded.category,
+          tags = excluded.tags, purpose = excluded.purpose, description = excluded.description,
+          size = excluded.size, updated_at = CURRENT_TIMESTAMP
+      `).run(
+        item.title, item.authors, item.year, item.path, item.filename,
+        item.type, item.category, item.tags, item.purpose, item.description, item.size,
+      );
+    });
+  }
+
   get fts(): boolean {
     return this._fts;
+  }
+
+  // Reading Progress
+
+  getReadingProgress(itemID: number): ReadingProgress | null {
+    const row = this.conn.prepare(
+      "SELECT * FROM reading_progress WHERE item_id = ?"
+    ).get(itemID) as unknown as ReadingProgress | undefined;
+    return row ?? null;
+  }
+
+  getAllReadingProgress(): ReadingProgress[] {
+    return this.conn.prepare("SELECT * FROM reading_progress").all() as unknown as ReadingProgress[];
+  }
+
+  upsertReadingProgress(p: ReadingProgress): void {
+    this.conn.prepare(`
+      INSERT INTO reading_progress (item_id, status, progress_percent, current_page, total_pages, started_at, finished_at, last_read_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(item_id) DO UPDATE SET
+        status = excluded.status, progress_percent = excluded.progress_percent,
+        current_page = excluded.current_page, total_pages = excluded.total_pages,
+        started_at = COALESCE(excluded.started_at, reading_progress.started_at),
+        finished_at = COALESCE(excluded.finished_at, reading_progress.finished_at),
+        last_read_at = COALESCE(excluded.last_read_at, reading_progress.last_read_at),
+        updated_at = CURRENT_TIMESTAMP
+    `).run(p.item_id, p.status, p.progress_percent, p.current_page, p.total_pages, p.started_at, p.finished_at, p.last_read_at);
+  }
+
+  // Reading Sessions
+
+  startReadingSession(itemID: number): ReadingSession {
+    const result = this.conn.prepare(`
+      INSERT INTO reading_sessions (item_id, started_at) VALUES (?, CURRENT_TIMESTAMP)
+    `).run(itemID);
+    const id = Number(result.lastInsertRowid);
+    this.conn.prepare(`
+      UPDATE reading_progress SET status = 'reading', started_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      WHERE item_id = ?
+    `).run(itemID);
+    return this.conn.prepare("SELECT * FROM reading_sessions WHERE id = ?").get(id) as unknown as ReadingSession;
+  }
+
+  stopReadingSession(sessionID: number, pagesRead: number): void {
+    this.conn.prepare(`
+      UPDATE reading_sessions SET ended_at = CURRENT_TIMESTAMP, pages_read = ?, duration_seconds = CAST((julianday(CURRENT_TIMESTAMP) - julianday(started_at)) * 86400 AS INTEGER) WHERE id = ?
+    `).run(pagesRead, sessionID);
+  }
+
+  getActiveSession(itemID: number): ReadingSession | null {
+    const row = this.conn.prepare(
+      "SELECT * FROM reading_sessions WHERE item_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1"
+    ).get(itemID) as ReadingSession | undefined;
+    return row ?? null;
+  }
+
+  getReadingSessions(itemID: number, limit: number): ReadingSession[] {
+    return this.conn.prepare(
+      "SELECT * FROM reading_sessions WHERE item_id = ? ORDER BY started_at DESC LIMIT ?"
+    ).all(itemID, limit) as unknown as ReadingSession[];
+  }
+
+  // Reading Queue
+
+  getReadingQueue(): ReadingQueueItem[] {
+    return this.conn.prepare(
+      "SELECT q.*, i.path as file_path, i.filename, i.type as file_type FROM reading_queue q LEFT JOIN items i ON q.item_id = i.id ORDER BY q.priority"
+    ).all() as unknown as ReadingQueueItem[];
+  }
+
+  addToReadingQueue(item: ReadingQueueItem): void {
+    this.conn.prepare(`
+      INSERT INTO reading_queue (item_id, focusd_book_number, title, author, priority) VALUES (?, ?, ?, ?, ?)
+    `).run(item.item_id, item.focusd_book_number, item.title, item.author, item.priority);
+  }
+
+  removeFromReadingQueue(id: number): void {
+    this.conn.prepare("DELETE FROM reading_queue WHERE id = ?").run(id);
+  }
+
+  reorderReadingQueue(ids: number[]): void {
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      if (id !== undefined) {
+        this.conn.prepare("UPDATE reading_queue SET priority = ? WHERE id = ?").run(i, id);
+      }
+    }
+  }
+
+  // Reading Finish
+
+  finishReading(itemID: number): void {
+    this.conn.prepare(`
+      UPDATE reading_progress SET status = 'finished', progress_percent = 100, finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE item_id = ?
+    `).run(itemID);
+    const session = this.getActiveSession(itemID);
+    if (session) {
+      this.stopReadingSession(session.id, 0);
+    }
+  }
+
+  // Dashboard
+
+  getReadingDashboard(): ReadingDashboard {
+    const currentlyReading = this.conn.prepare(`
+      SELECT i.*, rp.status, rp.progress_percent, rp.current_page, rp.total_pages, rp.started_at, rp.finished_at, rp.last_read_at, rp.updated_at
+      FROM reading_progress rp JOIN items i ON rp.item_id = i.id WHERE rp.status = 'reading'
+    `).all() as unknown as (Item & ReadingProgress)[];
+
+    const queue = this.getReadingQueue();
+    const totalReadBooks = (this.conn.prepare("SELECT COUNT(*) as c FROM reading_progress WHERE status = 'finished'").get() as { c: number }).c;
+    const todayMinutes = this.conn.prepare(`
+      SELECT COALESCE(SUM(duration_seconds), 0) / 60 as m FROM reading_sessions WHERE started_at >= date('now', 'start of day')
+    `).get() as { m: number };
+    const weekMinutes = this.conn.prepare(`
+      SELECT COALESCE(SUM(duration_seconds), 0) / 60 as m FROM reading_sessions WHERE started_at >= date('now', 'weekday 0', '-7 days')
+    `).get() as { m: number };
+
+    return {
+      currently_reading: currentlyReading.map((r) => ({
+        item: { id: r.id, title: r.title, authors: r.authors, year: r.year, path: r.path, filename: r.filename, type: r.type, category: r.category, tags: r.tags, purpose: r.purpose, description: r.description, size: r.size, added_at: r.added_at, updated_at: r.updated_at },
+        progress: { item_id: r.item_id, status: r.status, progress_percent: r.progress_percent, current_page: r.current_page, total_pages: r.total_pages, started_at: r.started_at, finished_at: r.finished_at, last_read_at: r.last_read_at, updated_at: r.updated_at },
+        today_minutes: 0,
+        total_minutes: 0,
+      })),
+      queue,
+      total_read_books: totalReadBooks,
+      total_reading_minutes: 0,
+      today_reading_minutes: todayMinutes.m,
+      week_reading_minutes: weekMinutes.m,
+    };
   }
 
   close(): void {
