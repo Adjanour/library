@@ -399,8 +399,24 @@ export async function scanDirectory(
   dirs: string[],
   progress?: (current: number, total: number, filename: string) => void,
   force = false,
-): Promise<Result<number>> {
+): Promise<Result<{ indexed: number; removed: number }>> {
   try {
+    // Remove items whose files no longer exist
+    const dbPaths = db.getAllPaths();
+    let removed = 0;
+    for (const p of dbPaths) {
+      try {
+        await Deno.stat(p);
+      } catch {
+        // File doesn't exist — remove from DB
+        const item = db.getItemByPath(p);
+        if (item.ok) {
+          db.deleteItem(item.value.id);
+          removed++;
+        }
+      }
+    }
+
     const existingPaths = new Set(db.getAllPaths());
     const files: string[] = [];
 
@@ -451,7 +467,7 @@ export async function scanDirectory(
       if (upsertResult.ok) indexed++;
     }
 
-    return Ok(indexed);
+    return Ok({ indexed, removed });
   } catch (e) {
     return Err(AppError("IO", `scan failed: ${e}`, e));
   }

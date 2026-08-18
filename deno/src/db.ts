@@ -14,7 +14,7 @@ import type {
   TagCount,
 } from "./types.ts";
 import {
-  AppError,
+  type AppError,
   DatabaseError,
   Err,
   fromTryCatch,
@@ -425,6 +425,12 @@ export class DB {
   getAllPaths(): string[] {
     const rows = this.conn.prepare("SELECT path FROM items").all() as { path: string }[];
     return rows.map((r) => r.path);
+  }
+
+  getItemByPath(path: string): Result<Item> {
+    const row = this.conn.prepare("SELECT * FROM items WHERE path = ?").get(path) as Item | undefined;
+    if (!row) return Err(NotFound("Item", path));
+    return Ok(row);
   }
 
   upsertItem(item: Item): Result<void> {

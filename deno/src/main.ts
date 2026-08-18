@@ -15,6 +15,13 @@ import { dirname, join, fromFileUrl } from "@std/path";
 const app = new Hono();
 const db = new DB();
 
+const homeDir = Deno.env.get("HOME") ?? ".";
+const DEFAULT_SCAN_DIRS = [
+  `${homeDir}/Documents`,
+  `${homeDir}/Downloads`,
+  `${homeDir}/Books`,
+];
+
 function respond<T>(result: Result<T>): Response {
   return match(result, {
     ok: (data) => Response.json(data),
@@ -206,11 +213,26 @@ app.post("/api/reading/sync-readest", () => {
 });
 
 app.post("/api/scan", async (c) => {
-  const body = await c.req.json();
-  const dirs = body.dirs as string[];
-  const force = body.force as boolean;
-  const result = await scanDirectory(db, dirs, undefined, force);
-  return respond(result);
+  let dirs = DEFAULT_SCAN_DIRS;
+  let force = false;
+  try {
+    const body = await c.req.json();
+    if (body.dirs) dirs = body.dirs;
+    if (body.force) force = body.force;
+  } catch {
+    // No body sent — use defaults
+  }
+  let total = 0;
+  const result = await scanDirectory(db, dirs, (_current, t) => {
+    total = t;
+  }, force);
+  return match(result, {
+    ok: ({ indexed, removed }) => Response.json({ indexed, removed, total }),
+    err: (e) => Response.json(
+      { error: e.message },
+      { status: e.code === "NOT_FOUND" ? 404 : 500 }
+    ),
+  });
 });
 
 // Static file serving for frontend
