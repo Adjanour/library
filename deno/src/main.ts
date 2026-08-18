@@ -227,7 +227,7 @@ app.post("/api/scan", async (c) => {
     total = t;
   }, force);
   return match(result, {
-    ok: ({ indexed, removed }) => Response.json({ indexed, removed, total }),
+    ok: ({ indexed, removed, moved }) => Response.json({ indexed, removed, moved, total }),
     err: (e) => Response.json(
       { error: e.message },
       { status: e.code === "NOT_FOUND" ? 404 : 500 }

@@ -23,6 +23,7 @@ export interface ItemUpdate {
   title?: string | null;
   authors?: string | null;
   year?: number | null;
+  path?: string | null;
   category?: string | null;
   tags?: string | null;
   purpose?: string | null;

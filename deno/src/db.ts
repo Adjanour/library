@@ -273,6 +273,10 @@ export class DB {
       sets.push("description = ?");
       args.push(u.description);
     }
+    if (u.path !== undefined) {
+      sets.push("path = ?");
+      args.push(u.path);
+    }
 
     if (sets.length === 0) {
       return Err(Validation("update", "no fields provided"));
@@ -425,6 +429,10 @@ export class DB {
   getAllPaths(): string[] {
     const rows = this.conn.prepare("SELECT path FROM items").all() as { path: string }[];
     return rows.map((r) => r.path);
+  }
+
+  getAllItems(): Item[] {
+    return this.conn.prepare("SELECT * FROM items").all() as unknown as Item[];
   }
 
   getItemByPath(path: string): Result<Item> {

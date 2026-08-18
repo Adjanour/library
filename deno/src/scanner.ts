@@ -399,36 +399,56 @@ export async function scanDirectory(
   dirs: string[],
   progress?: (current: number, total: number, filename: string) => void,
   force = false,
-): Promise<Result<{ indexed: number; removed: number }>> {
+): Promise<Result<{ indexed: number; removed: number; moved: number }>> {
   try {
-    // Remove items whose files no longer exist
-    const dbPaths = db.getAllPaths();
-    let removed = 0;
-    for (const p of dbPaths) {
-      try {
-        await Deno.stat(p);
-      } catch {
-        // File doesn't exist — remove from DB
-        const item = db.getItemByPath(p);
-        if (item.ok) {
-          db.deleteItem(item.value.id);
-          removed++;
-        }
-      }
-    }
-
-    const existingPaths = new Set(db.getAllPaths());
-    const files: string[] = [];
-
+    // Collect all files on disk
+    const diskFiles = new Map<string, string>(); // filename → fullPath
     for (const dir of dirs) {
       for await (const entry of Deno.readDir(dir)) {
         if (!entry.isFile) continue;
         const ext = extname(entry.name).toLowerCase();
         if (!(ext in SUPPORTED_EXTENSIONS)) continue;
-        const fullPath = `${dir}/${entry.name}`;
-        if (force || !existingPaths.has(fullPath)) {
-          files.push(fullPath);
-        }
+        diskFiles.set(entry.name, `${dir}/${entry.name}`);
+      }
+    }
+
+    // Check each DB item: exists? moved? removed?
+    const dbItems = db.getAllItems();
+    let removed = 0;
+    let moved = 0;
+    const seenOnDisk = new Set<string>(); // filenames we've matched
+
+    for (const item of dbItems) {
+      const filename = basename(item.path);
+
+      // File still at original path?
+      try {
+        await Deno.stat(item.path);
+        seenOnDisk.add(filename);
+        continue;
+      } catch {
+        // File missing — try to find it by filename
+      }
+
+      const newPath = diskFiles.get(filename);
+      if (newPath && !seenOnDisk.has(filename)) {
+        // File moved — update path
+        db.updateItem(item.id, { path: newPath } as any);
+        moved++;
+        seenOnDisk.add(filename);
+      } else {
+        // File truly gone — delete
+        db.deleteItem(item.id);
+        removed++;
+      }
+    }
+
+    // Add new files not already in DB
+    const existingPaths = new Set(db.getAllPaths());
+    const files: string[] = [];
+    for (const [filename, fullPath] of diskFiles) {
+      if (force || !existingPaths.has(fullPath)) {
+        files.push(fullPath);
       }
     }
 
@@ -467,7 +487,7 @@ export async function scanDirectory(
       if (upsertResult.ok) indexed++;
     }
 
-    return Ok({ indexed, removed });
+    return Ok({ indexed, removed, moved });
   } catch (e) {
     return Err(AppError("IO", `scan failed: ${e}`, e));
   }
