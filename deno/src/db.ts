@@ -441,6 +441,10 @@ export class DB {
     return Ok(row);
   }
 
+  updatePath(id: number, newPath: string): void {
+    this.conn.prepare("UPDATE items SET path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newPath, id);
+  }
+
   upsertItem(item: Item): Result<void> {
     return fromTryCatch(() => {
       this.conn.prepare(`

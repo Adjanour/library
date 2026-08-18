@@ -140,7 +140,7 @@ function firstXMLField(xml: string, field: string): string {
 }
 
 function allXMLFields(xml: string, field: string): string[] {
-  const re = new RegExp(`<(?:[a-zA-Z]+:)?${field}[^>]*>(.*?)</(?:[a-zA-Z]+:)?${field}>`, "is");
+  const re = new RegExp(`<(?:[a-zA-Z]+:)?${field}[^>]*>(.*?)</(?:[a-zA-Z]+:)?${field}>`, "gis");
   return [...xml.matchAll(re)]
     .map((m) => decodeHtmlEntities(m[1]!.trim()))
     .filter(Boolean);
@@ -401,43 +401,62 @@ export async function scanDirectory(
   force = false,
 ): Promise<Result<{ indexed: number; removed: number; moved: number }>> {
   try {
-    // Collect all files on disk
-    const diskFiles = new Map<string, string>(); // filename → fullPath
-    for (const dir of dirs) {
-      for await (const entry of Deno.readDir(dir)) {
-        if (!entry.isFile) continue;
-        const ext = extname(entry.name).toLowerCase();
-        if (!(ext in SUPPORTED_EXTENSIONS)) continue;
-        diskFiles.set(entry.name, `${dir}/${entry.name}`);
+    // Collect all files on disk (recursive, max depth 5)
+    const diskPaths = new Set<string>(); // full paths on disk
+    const diskByName = new Map<string, string[]>(); // filename → [paths]
+    async function scanDir(dir: string, depth = 0) {
+      if (depth > 5) return;
+      try {
+        for await (const entry of Deno.readDir(dir)) {
+          if (entry.name.startsWith(".")) continue;
+          const fullPath = `${dir}/${entry.name}`;
+          if (entry.isDirectory) {
+            await scanDir(fullPath, depth + 1);
+          } else if (entry.isFile) {
+            const ext = extname(entry.name).toLowerCase();
+            if (ext in SUPPORTED_EXTENSIONS) {
+              diskPaths.add(fullPath);
+              const arr = diskByName.get(entry.name) ?? [];
+              arr.push(fullPath);
+              diskByName.set(entry.name, arr);
+            }
+          }
+        }
+      } catch {
+        // Skip directories we can't read (permission denied, etc.)
       }
     }
+    for (const dir of dirs) {
+      await scanDir(dir);
+    }
 
-    // Check each DB item: exists? moved? removed?
+    // Check each DB item
     const dbItems = db.getAllItems();
     let removed = 0;
     let moved = 0;
-    const seenOnDisk = new Set<string>(); // filenames we've matched
+    const claimed = new Set<string>(); // disk paths already matched
 
+    // First pass: check all paths exist
     for (const item of dbItems) {
-      const filename = basename(item.path);
-
-      // File still at original path?
-      try {
-        await Deno.stat(item.path);
-        seenOnDisk.add(filename);
-        continue;
-      } catch {
-        // File missing — try to find it by filename
+      if (diskPaths.has(item.path)) {
+        claimed.add(item.path);
       }
+    }
 
-      const newPath = diskFiles.get(filename);
-      if (newPath && !seenOnDisk.has(filename)) {
-        // File moved — update path
-        db.updateItem(item.id, { path: newPath } as any);
+    // Second pass: handle missing files
+    for (const item of dbItems) {
+      if (claimed.has(item.path)) continue;
+
+      // Try to find by filename only (first unclaimed match)
+      const filename = basename(item.path);
+      const candidates = diskByName.get(filename) ?? [];
+      const match = candidates.find((p) => !claimed.has(p));
+
+      if (match) {
+        db.updatePath(item.id, match);
+        claimed.add(match);
         moved++;
-        seenOnDisk.add(filename);
       } else {
-        // File truly gone — delete
         db.deleteItem(item.id);
         removed++;
       }
@@ -446,7 +465,7 @@ export async function scanDirectory(
     // Add new files not already in DB
     const existingPaths = new Set(db.getAllPaths());
     const files: string[] = [];
-    for (const [filename, fullPath] of diskFiles) {
+    for (const fullPath of diskPaths) {
       if (force || !existingPaths.has(fullPath)) {
         files.push(fullPath);
       }
