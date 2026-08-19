@@ -257,7 +257,8 @@ export async function extractTitleFromFirstPage(path: string): Promise<string> {
 }
 
 export async function extractPDF(path: string, filename: string): Promise<Partial<Item>> {
-  const item: Partial<Item> = { path, filename, type: guessType(path, filename) };
+  const info = Deno.statSync(path);
+  const item: Partial<Item> = { path, filename, type: guessType(path, filename), size: info.size };
 
   let { title, author, subject } = await extractPDFMetadata(path);
   title = cleanMetadata(title);
@@ -401,18 +402,28 @@ export async function scanDirectory(
   force = false,
 ): Promise<Result<{ indexed: number; removed: number; moved: number }>> {
   try {
-    // Collect all files on disk (recursive, max depth 5)
+    // Collect all files on disk (recursive, max depth 10)
     const diskPaths = new Set<string>(); // full paths on disk
     const diskByName = new Map<string, string[]>(); // filename → [paths]
     async function scanDir(dir: string, depth = 0) {
-      if (depth > 5) return;
+      if (depth > 10) return;
       try {
         for await (const entry of Deno.readDir(dir)) {
           if (entry.name.startsWith(".")) continue;
           const fullPath = `${dir}/${entry.name}`;
           if (entry.isDirectory) {
             await scanDir(fullPath, depth + 1);
-          } else if (entry.isFile) {
+          } else if (entry.isFile || entry.isSymlink) {
+            // For symlinks, stat to resolve target
+            try {
+              const stat = await Deno.stat(fullPath);
+              if (stat.isDirectory) {
+                await scanDir(fullPath, depth + 1);
+                continue;
+              }
+            } catch {
+              continue; // broken symlink
+            }
             const ext = extname(entry.name).toLowerCase();
             if (ext in SUPPORTED_EXTENSIONS) {
               diskPaths.add(fullPath);
@@ -501,6 +512,7 @@ export async function scanDirectory(
       item.category = item.category || guessCategory(path, filename);
       item.tags = item.tags || guessTags(path, filename);
       item.purpose = item.purpose || guessPurpose(item.title ?? "", item.category, item.tags, item.description ?? "", filename);
+      item.description = item.description || "";
 
       const upsertResult = db.upsertItem(item as Item);
       if (upsertResult.ok) indexed++;
