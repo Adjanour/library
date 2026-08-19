@@ -24,7 +24,7 @@ const DEFAULT_SCAN_DIRS = [
 
 function respond<T>(result: Result<T>): Response {
   return match(result, {
-    ok: (data) => Response.json(data),
+    ok: (data) => data === undefined ? Response.json({ ok: true }) : Response.json(data),
     err: (e) => Response.json(
       { error: e.message },
       { status: e.code === "NOT_FOUND" ? 404 : 500 }
@@ -82,7 +82,9 @@ app.put("/api/items/:id", async (c) => {
   if (!parsed.success) {
     return Response.json({ error: parsed.error.message }, { status: 400 });
   }
-  return respond(db.updateItem(id.value, parsed.data));
+  const result = db.updateItem(id.value, parsed.data);
+  if (!result.ok) return respond(result);
+  return respond(db.getItem(id.value));
 });
 
 app.delete("/api/items/:id", (c) => {
