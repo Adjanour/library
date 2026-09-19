@@ -298,17 +298,20 @@
                 queueProgressSync();
             });
 
-            await book.ready;
-            contents = (book.navigation?.toc || []).flatMap((entry: any) => [
-                { label: entry.label?.trim() || "Untitled section", href: entry.href },
-                ...(entry.subitems || []).map((subitem: any) => ({
-                    label: `  ${subitem.label?.trim() || "Untitled section"}`,
-                    href: subitem.href,
-                })),
-            ]);
+            const navigationReady = book.ready.then(() => {
+                if (!mounted) return;
+                contents = (book.navigation?.toc || []).flatMap((entry: any) => [
+                    { label: entry.label?.trim() || "Untitled section", href: entry.href },
+                    ...(entry.subitems || []).map((subitem: any) => ({
+                        label: `  ${subitem.label?.trim() || "Untitled section"}`,
+                        href: subitem.href,
+                    })),
+                ]);
+            }).catch(() => {});
             let savedPosition = "";
             try { savedPosition = localStorage.getItem(`library:epub-position:${item.id}`) || ""; } catch {}
             await rendition.display(savedPosition || undefined);
+            void navigationReady;
             if (!mounted) return;
             ready = true;
             loading = false;
