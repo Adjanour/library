@@ -28,6 +28,16 @@ export function openFile(db: DB, id: number): Result<{ status: string },AppError
     cmd.spawn();
     return Ok({ status: "opened" });
   } catch (e) {
+    if (Deno.build.os === "linux" && [".epub", ".mobi", ".azw3", ".fb2"].includes(ext)) {
+      try {
+        new Deno.Command("flatpak", {
+          args: ["run", "com.bilingify.readest", path],
+        }).spawn();
+        return Ok({ status: "opened" });
+      } catch {
+        // Return the original error below when neither launcher works.
+      }
+    }
     return Err(AppError("IO", `failed to open: ${e}`, e));
   }
 }
