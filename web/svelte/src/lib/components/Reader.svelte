@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from "svelte";
+    import { api } from "$lib/api";
 
     let {
         item,
@@ -16,13 +17,22 @@
     let loading = $state(true);
     let error = $state("");
     let currentPercent = $state(0);
+    let currentCfi = $state("");
+    let currentChapter = $state("");
     let showSettings = $state(false);
+    let showPanel = $state<"contents" | "bookmarks" | null>(null);
     let navigating = $state(false);
+    let focusMode = $state(false);
+    let contents = $state<{ label: string; href: string }[]>([]);
+    let bookmarks = $state<{ cfi: string; label: string; percent: number }[]>([]);
     let resizeObserver: ResizeObserver | null = null;
+    let progressTimer: ReturnType<typeof setTimeout> | null = null;
     let mounted = true;
 
     // ── Reader settings (persisted in localStorage) ──────────────────────
     const FONT_SIZES = [80, 90, 100, 110, 125, 150, 175, 200];
+    const LINE_HEIGHTS = [1.35, 1.5, 1.65, 1.8, 2];
+    const CONTENT_WIDTHS = [560, 640, 720, 840, 960];
     const FONT_FAMILIES: Record<string, string> = {
         default: "",
         serif: "Georgia, 'Times New Roman', serif",
@@ -33,11 +43,14 @@
         light: { bg: "#ffffff", fg: "#1a1a1a" },
         sepia: { bg: "#f4ecd8", fg: "#5b4636" },
         dark: { bg: "#1e1e1e", fg: "#d4d4d4" },
+        black: { bg: "#090909", fg: "#e2e2e2" },
     };
 
     let settings = $state({
         fontSize: 100,
         fontFamily: "default",
+        lineHeight: 1.65,
+        contentWidth: 840,
         theme: "light",
         spread: "none" as "none" | "both",
         flow: "paginated" as "paginated" | "scrolled",
@@ -49,6 +62,8 @@
         try {
             const saved = localStorage.getItem("library:epub-settings");
             if (saved) settings = { ...settings, ...JSON.parse(saved) };
+            const savedBookmarks = localStorage.getItem(`library:epub-bookmarks:${item.id}`);
+            if (savedBookmarks) bookmarks = JSON.parse(savedBookmarks);
         } catch {}
     }
 
@@ -73,6 +88,22 @@
         saveSettings();
     }
 
+    function changeLineHeight(delta: number) {
+        const idx = LINE_HEIGHTS.indexOf(settings.lineHeight);
+        const nextIdx = Math.max(0, Math.min(LINE_HEIGHTS.length - 1, idx + delta));
+        settings.lineHeight = LINE_HEIGHTS[nextIdx];
+        applyTypography();
+        saveSettings();
+    }
+
+    function changeContentWidth(delta: number) {
+        const idx = CONTENT_WIDTHS.indexOf(settings.contentWidth);
+        const nextIdx = Math.max(0, Math.min(CONTENT_WIDTHS.length - 1, idx + delta));
+        settings.contentWidth = CONTENT_WIDTHS[nextIdx];
+        applyTypography();
+        saveSettings();
+    }
+
     function changeTheme(theme: string) {
         settings.theme = theme;
         applyTheme();
@@ -91,6 +122,60 @@
         saveSettings();
     }
 
+    function togglePanel(panel: "contents" | "bookmarks") {
+        showSettings = false;
+        showPanel = showPanel === panel ? null : panel;
+    }
+
+    function saveBookmarks() {
+        try { localStorage.setItem(`library:epub-bookmarks:${item.id}`, JSON.stringify(bookmarks)); } catch {}
+    }
+
+    function toggleBookmark() {
+        if (!currentCfi) return;
+        const existing = bookmarks.findIndex((bookmark) => bookmark.cfi === currentCfi);
+        if (existing >= 0) bookmarks.splice(existing, 1);
+        else bookmarks.unshift({ cfi: currentCfi, label: currentChapter || `Page ${currentPercent}%`, percent: currentPercent });
+        bookmarks = [...bookmarks];
+        saveBookmarks();
+    }
+
+    function isBookmarked() {
+        return bookmarks.some((bookmark) => bookmark.cfi === currentCfi);
+    }
+
+    async function displayLocation(target: string) {
+        if (!rendition || navigating) return;
+        navigating = true;
+        try {
+            await rendition.display(target);
+            showPanel = null;
+        } finally {
+            navigating = false;
+        }
+    }
+
+    function removeBookmark(cfi: string) {
+        bookmarks = bookmarks.filter((bookmark) => bookmark.cfi !== cfi);
+        saveBookmarks();
+    }
+
+    function savePosition() {
+        if (!currentCfi) return;
+        try { localStorage.setItem(`library:epub-position:${item.id}`, currentCfi); } catch {}
+    }
+
+    function queueProgressSync() {
+        savePosition();
+        if (progressTimer) clearTimeout(progressTimer);
+        progressTimer = setTimeout(() => {
+            api.readingProgress(item.id).then((progress) => api.updateProgress(item.id, {
+                ...progress,
+                progress_percent: currentPercent,
+            })).catch(() => {});
+        }, 500);
+    }
+
     // ── Apply settings to rendition ──────────────────────────────────────
     function applyFontSize() {
         rendition?.themes.fontSize(`${settings.fontSize}%`);
@@ -98,6 +183,14 @@
     function applyFontFamily() {
         const fam = FONT_FAMILIES[settings.fontFamily];
         if (fam) rendition?.themes.font(fam);
+        else rendition?.themes.override("font-family", "", true);
+    }
+    function applyTypography() {
+        rendition?.themes.override("line-height", String(settings.lineHeight), true);
+        rendition?.themes.override("max-width", `${settings.contentWidth}px`, true);
+        rendition?.themes.override("margin-left", "auto", true);
+        rendition?.themes.override("margin-right", "auto", true);
+        applyFontFamily();
     }
     function applyTheme() {
         rendition?.themes.select(settings.theme);
@@ -144,12 +237,20 @@
             prev();
         }
         if (e.key === "Escape") {
-            if (showSettings) {
+            if (showSettings || showPanel) {
                 showSettings = false;
+                showPanel = null;
+            } else if (focusMode) {
+                focusMode = false;
             } else {
                 onClose();
             }
         }
+        if (e.key.toLowerCase() === "b" && ready) toggleBookmark();
+        if (e.key.toLowerCase() === "t" && ready) togglePanel("contents");
+        if (e.key.toLowerCase() === "f" && ready) focusMode = !focusMode;
+        if (e.key === "+" || e.key === "=") changeFontSize(1);
+        if (e.key === "-") changeFontSize(-1);
     }
 
     onMount(async () => {
@@ -186,16 +287,29 @@
                 if (location?.percentage) {
                     currentPercent = Math.round(location.percentage * 100);
                 }
+                currentCfi = location?.start?.cfi || "";
+                currentChapter = location?.start?.href?.split("#")[0]?.split("/").pop()?.replace(/\.(xhtml|html?)$/i, "") || "";
+                queueProgressSync();
             });
 
-            await rendition.display();
+            await book.ready;
+            contents = (book.navigation?.toc || []).flatMap((entry: any) => [
+                { label: entry.label?.trim() || "Untitled section", href: entry.href },
+                ...(entry.subitems || []).map((subitem: any) => ({
+                    label: `  ${subitem.label?.trim() || "Untitled section"}`,
+                    href: subitem.href,
+                })),
+            ]);
+            let savedPosition = "";
+            try { savedPosition = localStorage.getItem(`library:epub-position:${item.id}`) || ""; } catch {}
+            await rendition.display(savedPosition || undefined);
             if (!mounted) return;
             ready = true;
             loading = false;
 
             // Apply font settings after display
             applyFontSize();
-            applyFontFamily();
+            applyTypography();
 
             // Set viewer background
             const t = THEMES[settings.theme];
@@ -215,29 +329,63 @@
     onDestroy(() => {
         mounted = false;
         window.removeEventListener("keydown", onKey);
+        if (progressTimer) clearTimeout(progressTimer);
         resizeObserver?.disconnect();
         rendition?.destroy();
         book?.destroy();
     });
 </script>
 
-<div class="fixed inset-0 bg-surface-0 z-40 flex flex-col" role="dialog" aria-label="EPUB reader">
+<div class="fixed inset-0 bg-surface-0 z-40 flex flex-col relative" role="dialog" aria-label="EPUB reader">
+    {#if !focusMode}
     <!-- Reader header -->
     <div class="flex items-center gap-2 px-4 py-2 border-b border-border bg-surface-1 shrink-0">
-        <button class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0" title="Close (Esc)" onclick={onClose}>
+        <button class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0" title="Close (Esc)" aria-label="Close reader" onclick={onClose}>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
                 ><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
         </button>
         <div class="min-w-0 flex-1">
             <div class="text-sm font-medium truncate">{item.title}</div>
-            {#if ready}<div class="text-[10px] text-text-muted">{currentPercent}% read</div>{/if}
+            {#if ready}<div class="text-[10px] text-text-muted truncate">{currentChapter || `${currentPercent}% read`}</div>{/if}
         </div>
+
+        <button
+            class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0"
+            class:bg-surface-3={showPanel === "contents"}
+            title="Contents (T)"
+            aria-label="Table of contents"
+            onclick={() => togglePanel("contents")}
+        >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="18" x2="20" y2="18" /></svg>
+        </button>
+        <button
+            class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0"
+            class:bg-surface-3={showPanel === "bookmarks" || isBookmarked()}
+            class:text-accent={isBookmarked()}
+            title="Bookmark (B)"
+            aria-label={isBookmarked() ? "Remove bookmark" : "Add bookmark"}
+            onclick={toggleBookmark}
+        >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill={isBookmarked() ? "currentColor" : "none"} stroke="currentColor" stroke-width="2"><path d="M6 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18l-6-3-6 3V4z" /></svg>
+        </button>
+        <button
+            class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0"
+            class:bg-surface-3={focusMode}
+            title="Focus mode (F)"
+            aria-label="Toggle focus mode"
+            onclick={() => (focusMode = !focusMode)}
+        >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" /></svg>
+        </button>
+
+        <div class="w-px h-5 bg-border mx-1 shrink-0"></div>
 
         <!-- Settings gear -->
         <button
             class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0"
             class:bg-surface-3={showSettings}
             title="Settings"
+            aria-label="Reader settings"
             onclick={() => (showSettings = !showSettings)}
         >
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
@@ -282,6 +430,25 @@
                     <option value="sans">Sans-serif</option>
                     <option value="mono">Monospace</option>
                 </select>
+            </div>
+
+            <div class="w-px h-5 bg-border shrink-0"></div>
+
+            <!-- Reading rhythm -->
+            <div class="flex items-center gap-1.5">
+                <span class="text-text-muted text-[10px] uppercase tracking-wider">Line</span>
+                <button class="w-6 h-6 rounded bg-surface-2 hover:bg-surface-3 disabled:opacity-30" onclick={() => changeLineHeight(-1)} disabled={settings.lineHeight === LINE_HEIGHTS[0]} title="Tighter line spacing">−</button>
+                <span class="w-8 text-center text-text-secondary tabular-nums">{settings.lineHeight}</span>
+                <button class="w-6 h-6 rounded bg-surface-2 hover:bg-surface-3 disabled:opacity-30" onclick={() => changeLineHeight(1)} disabled={settings.lineHeight === LINE_HEIGHTS[LINE_HEIGHTS.length - 1]} title="Looser line spacing">+</button>
+            </div>
+
+            <div class="w-px h-5 bg-border shrink-0"></div>
+
+            <div class="flex items-center gap-1.5">
+                <span class="text-text-muted text-[10px] uppercase tracking-wider">Width</span>
+                <button class="w-6 h-6 rounded bg-surface-2 hover:bg-surface-3 disabled:opacity-30" onclick={() => changeContentWidth(-1)} disabled={settings.contentWidth === CONTENT_WIDTHS[0]} title="Narrower text column">−</button>
+                <span class="w-10 text-center text-text-secondary tabular-nums">{settings.contentWidth}</span>
+                <button class="w-6 h-6 rounded bg-surface-2 hover:bg-surface-3 disabled:opacity-30" onclick={() => changeContentWidth(1)} disabled={settings.contentWidth === CONTENT_WIDTHS[CONTENT_WIDTHS.length - 1]} title="Wider text column">+</button>
             </div>
 
             <div class="w-px h-5 bg-border shrink-0"></div>
@@ -336,6 +503,46 @@
         <div class="h-0.5 bg-surface-2 shrink-0">
             <div class="h-full bg-accent transition-all" style="width: {currentPercent}%"></div>
         </div>
+    {/if}
+    {/if}
+
+    {#if showPanel}
+        <aside class="absolute top-0 bottom-0 left-0 z-30 w-80 max-w-[88vw] border-r border-border bg-surface-1 shadow-2xl flex flex-col">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+                <div>
+                    <div class="text-sm font-medium">{showPanel === "contents" ? "Contents" : "Bookmarks"}</div>
+                    <div class="text-[10px] text-text-muted">{showPanel === "contents" ? `${contents.length} sections` : `${bookmarks.length} saved`}</div>
+                </div>
+                <button class="p-1.5 rounded hover:bg-surface-3" aria-label="Close panel" title="Close" onclick={() => (showPanel = null)}>
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                </button>
+            </div>
+            <div class="overflow-y-auto p-2">
+                {#if showPanel === "contents"}
+                    {#if contents.length === 0}
+                        <div class="p-4 text-xs text-text-muted">This book does not provide a table of contents.</div>
+                    {:else}
+                        {#each contents as entry}
+                            <button class="w-full text-left px-3 py-2 rounded text-xs text-text-secondary hover:bg-surface-3 hover:text-text-primary transition-colors truncate" title={entry.label.trim()} onclick={() => displayLocation(entry.href)}>{entry.label}</button>
+                        {/each}
+                    {/if}
+                {:else if bookmarks.length === 0}
+                    <div class="p-4 text-xs text-text-muted">Press B or use the bookmark button to save this page.</div>
+                {:else}
+                    {#each bookmarks as bookmark}
+                        <div class="flex items-center gap-1 rounded hover:bg-surface-3 group">
+                            <button class="flex-1 min-w-0 text-left px-3 py-2 text-xs text-text-secondary hover:text-text-primary truncate" onclick={() => displayLocation(bookmark.cfi)}>
+                                <div class="truncate">{bookmark.label}</div>
+                                <div class="text-[10px] text-text-muted">{bookmark.percent}%</div>
+                            </button>
+                            <button class="p-2 text-text-muted hover:text-error opacity-0 group-hover:opacity-100" title="Remove bookmark" aria-label="Remove bookmark" onclick={() => removeBookmark(bookmark.cfi)}>
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>
+                            </button>
+                        </div>
+                    {/each}
+                {/if}
+            </div>
+        </aside>
     {/if}
 
     <!-- Viewer -->
