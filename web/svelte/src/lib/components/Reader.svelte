@@ -13,9 +13,13 @@
     let rendition: any = null;
     let book: any = null;
     let ready = $state(false);
+    let loading = $state(true);
     let error = $state("");
     let currentPercent = $state(0);
     let showSettings = $state(false);
+    let navigating = $state(false);
+    let resizeObserver: ResizeObserver | null = null;
+    let mounted = true;
 
     // ── Reader settings (persisted in localStorage) ──────────────────────
     const FONT_SIZES = [80, 90, 100, 110, 125, 150, 175, 200];
@@ -109,16 +113,36 @@
     }
 
     // ── Navigation ───────────────────────────────────────────────────────
-    function next() {
-        rendition?.next();
+    async function next() {
+        if (!rendition || navigating) return;
+        navigating = true;
+        try {
+            await rendition.next();
+        } finally {
+            navigating = false;
+        }
     }
-    function prev() {
-        rendition?.prev();
+    async function prev() {
+        if (!rendition || navigating) return;
+        navigating = true;
+        try {
+            await rendition.prev();
+        } finally {
+            navigating = false;
+        }
     }
 
     function onKey(e: KeyboardEvent) {
-        if (e.key === "ArrowRight") next();
-        if (e.key === "ArrowLeft") prev();
+        const target = e.target as HTMLElement | null;
+        if (target?.matches("input, select, textarea, [contenteditable='true']")) return;
+        if (e.key === "ArrowRight") {
+            e.preventDefault();
+            next();
+        }
+        if (e.key === "ArrowLeft") {
+            e.preventDefault();
+            prev();
+        }
         if (e.key === "Escape") {
             if (showSettings) {
                 showSettings = false;
@@ -135,7 +159,6 @@
 
         try {
             const ePub = (await import("epubjs")).default;
-
             const response = await fetch(`/api/file/${item.id}`);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const buffer = await response.arrayBuffer();
@@ -146,8 +169,6 @@
                 height: "100%",
                 spread: settings.spread,
                 flow: settings.flow,
-                allowScriptedContent: true,
-                allowPopups: true,
             });
 
             // Register themes
@@ -160,8 +181,17 @@
             }
             rendition.themes.select(settings.theme);
 
+            rendition.on("relocated", (location: any) => {
+                if (!mounted) return;
+                if (location?.percentage) {
+                    currentPercent = Math.round(location.percentage * 100);
+                }
+            });
+
             await rendition.display();
+            if (!mounted) return;
             ready = true;
+            loading = false;
 
             // Apply font settings after display
             applyFontSize();
@@ -171,26 +201,27 @@
             const t = THEMES[settings.theme];
             viewer.style.background = t.bg;
 
-            book.ready.then(() => {
-                rendition.on("relocated", (location: any) => {
-                    if (location?.percentage) {
-                        currentPercent = Math.round(location.percentage * 100);
-                    }
-                });
-            });
         } catch (e) {
-            error = `Failed to load EPUB: ${e}`;
+            loading = false;
+            error = e instanceof Error ? e.message : "Unable to load this EPUB.";
         }
+
+        resizeObserver = new ResizeObserver(() => {
+            rendition?.resize(viewer?.clientWidth, viewer?.clientHeight);
+        });
+        resizeObserver.observe(viewer);
     });
 
     onDestroy(() => {
+        mounted = false;
         window.removeEventListener("keydown", onKey);
+        resizeObserver?.disconnect();
         rendition?.destroy();
         book?.destroy();
     });
 </script>
 
-<div class="fixed inset-0 bg-surface-0 z-40 flex flex-col">
+<div class="fixed inset-0 bg-surface-0 z-40 flex flex-col" role="dialog" aria-label="EPUB reader">
     <!-- Reader header -->
     <div class="flex items-center gap-2 px-4 py-2 border-b border-border bg-surface-1 shrink-0">
         <button class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0" title="Close (Esc)" onclick={onClose}>
@@ -216,11 +247,11 @@
 
         <div class="w-px h-5 bg-border mx-1 shrink-0"></div>
 
-        <button class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0" title="Previous (←)" onclick={prev}>
+        <button class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0 disabled:opacity-30" title="Previous (←)" aria-label="Previous page" disabled={!ready || navigating} onclick={prev}>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
                 ><polyline points="15 18 9 12 15 6" /></svg>
         </button>
-        <button class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0" title="Next (→)" onclick={next}>
+        <button class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0 disabled:opacity-30" title="Next (→)" aria-label="Next page" disabled={!ready || navigating} onclick={next}>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
                 ><polyline points="9 18 15 12 9 6" /></svg>
         </button>
@@ -308,12 +339,15 @@
     {/if}
 
     <!-- Viewer -->
-    <div class="flex-1 relative">
+    <div class="flex-1 min-h-0 relative bg-surface-0">
         {#if error}
-            <div class="flex items-center justify-center h-full text-error text-sm p-8 text-center">{error}</div>
-        {:else if !ready}
-            <div class="flex items-center justify-center h-full text-text-muted text-sm">Loading EPUB…</div>
+            <div class="flex flex-col items-center justify-center h-full text-error text-sm p-8 text-center gap-2">
+                <div>Unable to load this EPUB.</div>
+                <div class="text-xs text-text-muted max-w-md">{error}</div>
+            </div>
+        {:else if loading}
+            <div class="absolute inset-0 flex items-center justify-center text-text-muted text-sm pointer-events-none">Loading EPUB…</div>
         {/if}
-        <div bind:this={viewer} class="w-full h-full"></div>
+        <div bind:this={viewer} class="w-full h-full max-w-5xl mx-auto"></div>
     </div>
 </div>

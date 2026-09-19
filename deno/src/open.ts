@@ -31,7 +31,7 @@ export function openFile(db: DB, id: number): Result<{ status: string },AppError
     if (Deno.build.os === "linux" && [".epub", ".mobi", ".azw3", ".fb2"].includes(ext)) {
       try {
         new Deno.Command("flatpak", {
-          args: ["run", "com.bilingify.readest", path],
+          args: ["run", "--file-forwarding", "com.bilingify.readest", "@@", path, "@@"],
         }).spawn();
         return Ok({ status: "opened" });
       } catch {

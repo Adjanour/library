@@ -60,6 +60,11 @@
         const buf = await res.arrayBuffer();
         if (cancelled) return;
         const book = ePub(buf);
+        await book.opened;
+        if (cancelled) {
+          book.destroy();
+          return;
+        }
         const url = await book.coverUrl();
         if (!cancelled) epubCoverUrl = url || '';
         book.destroy();
