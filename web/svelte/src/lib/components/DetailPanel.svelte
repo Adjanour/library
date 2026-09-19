@@ -159,7 +159,7 @@
           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
           Open (o)
         </button>
-        {#if ext === 'pdf' || ext === 'epub' || ext === 'mobi'}
+        {#if ext === 'pdf' || ext === 'epub'}
           <button class="px-3 py-1.5 text-xs bg-surface-2 border border-border rounded hover:bg-surface-3 transition-colors flex items-center gap-1.5" onclick={() => onRead(item)}>
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
             Read (r)

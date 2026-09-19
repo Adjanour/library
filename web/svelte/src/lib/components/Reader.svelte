@@ -9,6 +9,7 @@
         item: { id: number; title: string; filename: string };
         onClose: () => void;
     } = $props();
+    let isPdf = $derived(item.filename.toLowerCase().endsWith(".pdf"));
 
     let viewer: HTMLDivElement;
     let rendition: any = null;
@@ -257,6 +258,11 @@
         window.addEventListener("keydown", onKey);
         loadSettings();
         if (!viewer) return;
+        if (isPdf) {
+            ready = true;
+            loading = false;
+            return;
+        }
 
         try {
             const ePub = (await import("epubjs")).default;
@@ -349,6 +355,7 @@
             {#if ready}<div class="text-[10px] text-text-muted truncate">{currentChapter || `${currentPercent}% read`}</div>{/if}
         </div>
 
+        {#if !isPdf}
         <button
             class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0"
             class:bg-surface-3={showPanel === "contents"}
@@ -377,10 +384,12 @@
         >
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" /></svg>
         </button>
+        {/if}
 
         <div class="w-px h-5 bg-border mx-1 shrink-0"></div>
 
         <!-- Settings gear -->
+        {#if !isPdf}
         <button
             class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0"
             class:bg-surface-3={showSettings}
@@ -392,9 +401,11 @@
                 ><circle cx="12" cy="12" r="3" /><path
                     d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" /></svg>
         </button>
+        {/if}
 
         <div class="w-px h-5 bg-border mx-1 shrink-0"></div>
 
+        {#if !isPdf}
         <button class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0 disabled:opacity-30" title="Previous (←)" aria-label="Previous page" disabled={!ready || navigating} onclick={prev}>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
                 ><polyline points="15 18 9 12 15 6" /></svg>
@@ -403,6 +414,7 @@
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"
                 ><polyline points="9 18 15 12 9 6" /></svg>
         </button>
+        {/if}
     </div>
 
     <!-- Settings panel (collapsible) -->
@@ -506,7 +518,7 @@
     {/if}
     {/if}
 
-    {#if showPanel}
+    {#if showPanel && !isPdf}
         <aside class="absolute top-0 bottom-0 left-0 z-30 w-80 max-w-[88vw] border-r border-border bg-surface-1 shadow-2xl flex flex-col">
             <div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
                 <div>
@@ -547,7 +559,9 @@
 
     <!-- Viewer -->
     <div class="flex-1 min-h-0 relative bg-surface-0">
-        {#if error}
+        {#if isPdf}
+            <iframe src={`/api/file/${item.id}`} class="w-full h-full border-0" title={`PDF reader: ${item.title}`}></iframe>
+        {:else if error}
             <div class="flex flex-col items-center justify-center h-full text-error text-sm p-8 text-center gap-2">
                 <div>Unable to load this EPUB.</div>
                 <div class="text-xs text-text-muted max-w-md">{error}</div>
