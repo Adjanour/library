@@ -54,12 +54,14 @@
     let cancelled = false;
     (async () => {
       try {
-        const ePub = (await import('epubjs')).default;
+        // @ts-expect-error The package's browser bundle lacks a declaration file.
+        const ePub = (await import('@intity/epub-js/dist/public/epub.js')).default;
         const res = await fetch(`/api/file/${item.id}`);
         if (!res.ok || cancelled) return;
         const buf = await res.arrayBuffer();
         if (cancelled) return;
-        const book = ePub(buf);
+        const book = ePub();
+        await book.open(buf, 'binary');
         await book.opened;
         if (cancelled) {
           book.destroy();

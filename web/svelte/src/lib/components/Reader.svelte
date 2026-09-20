@@ -265,11 +265,13 @@
         }
 
         try {
-            const ePub = (await import("epubjs")).default;
+            // @ts-expect-error The package's browser bundle lacks a declaration file.
+            const ePub = (await import("@intity/epub-js/dist/public/epub.js")).default;
             const response = await fetch(`/api/file/${item.id}`);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const buffer = await response.arrayBuffer();
-            book = ePub(buffer);
+            book = ePub();
+            await book.open(buffer, "binary");
 
             rendition = book.renderTo(viewer, {
                 width: "100%",
@@ -288,6 +290,25 @@
             }
             rendition.themes.select(settings.theme);
 
+            book.on("openFailed", (cause: unknown) => {
+                if (mounted) {
+                    loading = false;
+                    error = cause instanceof Error ? cause.message : "Unable to open this EPUB archive.";
+                }
+            });
+            rendition.on("displayerror", (cause: unknown) => {
+                if (mounted) {
+                    loading = false;
+                    error = cause instanceof Error ? cause.message : "Unable to render this EPUB.";
+                }
+            });
+            rendition.on("loaderror", (cause: unknown) => {
+                if (mounted) {
+                    loading = false;
+                    error = cause instanceof Error ? cause.message : "Unable to load this EPUB section.";
+                }
+            });
+
             rendition.on("relocated", (location: any) => {
                 if (!mounted) return;
                 if (location?.percentage) {
@@ -298,7 +319,14 @@
                 queueProgressSync();
             });
 
-            const navigationReady = book.ready.then(() => {
+            await book.loaded.sections;
+            const firstSection = book.sections.get(0);
+            if (!firstSection) throw new Error("This EPUB has no readable chapters.");
+            let savedPosition = "";
+            try { savedPosition = localStorage.getItem(`library:epub-position:${item.id}`) || ""; } catch {}
+            if (savedPosition) await rendition.display(savedPosition);
+            else await rendition.display(0);
+            book.ready.then(() => {
                 if (!mounted) return;
                 contents = (book.navigation?.toc || []).flatMap((entry: any) => [
                     { label: entry.label?.trim() || "Untitled section", href: entry.href },
@@ -308,10 +336,6 @@
                     })),
                 ]);
             }).catch(() => {});
-            let savedPosition = "";
-            try { savedPosition = localStorage.getItem(`library:epub-position:${item.id}`) || ""; } catch {}
-            await rendition.display(savedPosition || undefined);
-            void navigationReady;
             if (!mounted) return;
             ready = true;
             loading = false;
@@ -345,7 +369,7 @@
     });
 </script>
 
-<div class="fixed inset-0 bg-surface-0 z-40 flex flex-col relative" role="dialog" aria-label="EPUB reader">
+<div class="fixed inset-0 bg-surface-0 z-40 flex flex-col" role="dialog" aria-label="EPUB reader">
     {#if !focusMode}
     <!-- Reader header -->
     <div class="flex items-center gap-2 px-4 py-2 border-b border-border bg-surface-1 shrink-0">
