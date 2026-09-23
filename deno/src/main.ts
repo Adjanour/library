@@ -97,22 +97,113 @@ app.on(["GET", "POST"], "/api/open/:id", (c) => {
   return id.ok ? respond(openFile(db, id.value)) : respond(id);
 });
 
+async function fileMetaHeaders(path: string, filename: string, total: number) {
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+  const mimeTypes: Record<string, string> = {
+    pdf: "application/pdf",
+    epub: "application/epub+zip",
+    mobi: "application/x-mobipocket-ebook",
+    djvu: "image/vnd.djvu",
+  };
+  let mtime = 0;
+  try {
+    const stat = await Deno.stat(path);
+    mtime = stat.mtime?.getTime() ?? 0;
+  } catch { /* ignore */ }
+  return {
+    "content-type": mimeTypes[ext] ?? "application/octet-stream",
+    "accept-ranges": "bytes",
+    "etag": `"${total}-${mtime}"`,
+    "last-modified": mtime ? new Date(mtime).toUTCString() : new Date(0).toUTCString(),
+  };
+}
+
+// HEAD serves metadata only so the PDF reader can learn the file length
+// (and range support) without downloading anything.
+async function fileHead(c: any) {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return Response.json({ error: "invalid id" }, { status: 400 });
+  const item = db.getItem(id.value);
+  if (!item.ok) return Response.json({ error: "not found" }, { status: 404 });
+  try {
+    const stat = await Deno.stat(item.value.path);
+    const headers = await fileMetaHeaders(item.value.path, item.value.filename, stat.size);
+    return new Response(null, {
+      headers: { ...headers, "content-length": String(stat.size) },
+    });
+  } catch {
+    return Response.json({ error: "file not found" }, { status: 404 });
+  }
+}
+app.on("HEAD", "/api/file/:id", fileHead);
+
 app.get("/api/file/:id", async (c) => {
   const id = parseId(c.req.param("id"));
   if (!id.ok) return Response.json({ error: "invalid id" }, { status: 400 });
   const item = db.getItem(id.value);
   if (!item.ok) return Response.json({ error: "not found" }, { status: 404 });
   try {
-    const file = await Deno.readFile(item.value.path);
-    const ext = item.value.filename.split(".").pop()?.toLowerCase() ?? "";
-    const mimeTypes: Record<string, string> = {
-      pdf: "application/pdf",
-      epub: "application/epub+zip",
-      mobi: "application/x-mobipocket-ebook",
-      djvu: "image/vnd.djvu",
-    };
-    return new Response(file, {
-      headers: { "content-type": mimeTypes[ext] ?? "application/octet-stream" },
+    const stat = await Deno.stat(item.value.path);
+    const total = stat.size;
+    const meta = await fileMetaHeaders(item.value.path, item.value.filename, total);
+    const contentType = meta["content-type"];
+    const range = c.req.header("range");
+    if (range) {
+      const match = /bytes=(\d*)-(\d*)/.exec(range);
+      if (match) {
+        const rawStart = match[1] ?? "";
+        const rawEnd = match[2] ?? "";
+        let start = rawStart === "" ? null : parseInt(rawStart, 10);
+        let end = rawEnd === "" ? null : parseInt(rawEnd, 10);
+        if (start === null && end !== null) {
+          start = Math.max(0, total - end);
+          end = total - 1;
+        } else {
+          start = start ?? 0;
+          end = end === null || end >= total ? total - 1 : end;
+        }
+        if (start >= 0 && end >= start && start < total) {
+          const len = end - start + 1;
+          const f = await Deno.open(item.value.path, { read: true });
+          try {
+            await f.seek(start, Deno.SeekMode.Start);
+            const buf = new Uint8Array(len);
+            let read = 0;
+            while (read < len) {
+              const n = await f.read(buf.subarray(read));
+              if (n === null) break;
+              read += n;
+            }
+            return new Response(buf.subarray(0, read), {
+              status: 206,
+              headers: {
+                ...meta,
+                "content-type": contentType,
+                "content-length": String(read),
+                "content-range": `bytes ${start}-${start + read - 1}/${total}`,
+              },
+            });
+          } finally {
+            f.close();
+          }
+        }
+        return new Response("Range Not Satisfiable", {
+          status: 416,
+          headers: { "content-range": `bytes */${total}` },
+        });
+      }
+    }
+    // Stream the file instead of buffering it: pdf.js opens every document
+    // with a full GET before switching to ranges, then aborts it. Buffering
+    // a 130MB file for an aborted response stalls the event loop and wastes
+    // memory; streaming makes the abort nearly free.
+    const f = await Deno.open(item.value.path, { read: true });
+    return new Response(f.readable, {
+      headers: {
+        ...meta,
+        "content-type": contentType,
+        "content-length": String(total),
+      },
     });
   } catch {
     return Response.json({ error: "file not found" }, { status: 404 });
@@ -252,6 +343,8 @@ app.get("/*", async (c) => {
       html: "text/html",
       css: "text/css",
       js: "application/javascript",
+      mjs: "application/javascript",
+      wasm: "application/wasm",
       json: "application/json",
       png: "image/png",
       jpg: "image/jpeg",

@@ -44,6 +44,26 @@
     }
   });
 
+  // Warm up the PDF engine when a PDF is selected so the module parse
+  // (~1MB core + viewer) happens while the user reads metadata, not after
+  // they press Read. Idle-scheduled to avoid hitching the selection itself.
+  $effect(() => {
+    if (!item || fileExt(item.filename) !== 'pdf') return;
+    const warm = () => {
+      import('pdfjs-dist').then((pdfjs) => {
+        (globalThis as any).pdfjsLib = (globalThis as any).pdfjsLib || pdfjs;
+        return import('pdfjs-dist/web/pdf_viewer.mjs');
+      }).catch(() => {});
+      import('pdfjs-dist/web/pdf_viewer.css').catch(() => {});
+    };
+    if ('requestIdleCallback' in window) {
+      const id = (window as any).requestIdleCallback(warm, { timeout: 2000 });
+      return () => (window as any).cancelIdleCallback?.(id);
+    }
+    const t = setTimeout(warm, 300);
+    return () => clearTimeout(t);
+  });
+
   // Load epub cover when item changes
   $effect(() => {
     epubCoverUrl = '';
@@ -226,10 +246,18 @@
     </div>
     {/if}
 
-    <!-- Preview -->
+    <!-- Preview (PDFs intentionally have no inline preview: the preview
+         iframe used to download the entire file before reading started.
+         The in-app reader streams only the pages being viewed.) -->
     <div class="flex-1 overflow-hidden bg-surface-1">
       {#if ext === 'pdf'}
-        <iframe src={previewUrl} class="w-full h-full" title="PDF preview"></iframe>
+        <div class="flex flex-col items-center justify-center h-full text-text-muted p-8">
+          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1" class="mb-3 opacity-30">
+            <path d="M4 19.5A2.5 2.5 0 016.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
+          </svg>
+          <div class="text-sm text-text-secondary">{item.title}</div>
+          <div class="text-xs mt-1">Press r to read or o to open externally</div>
+        </div>
       {:else if ext === 'epub' && epubCoverUrl}
         <div class="flex flex-col items-center justify-center h-full p-6 gap-4">
           <img src={epubCoverUrl} alt={item.title} class="max-h-[60%] max-w-full object-contain rounded shadow-lg" />

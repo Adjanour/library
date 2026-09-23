@@ -26,6 +26,7 @@
 	"dependencies": {
 		"@intity/epub-js": "^0.3.98",
 		"jszip": "^3.10.1",
-		"localforage": "^1.10.0"
+		"localforage": "^1.10.0",
+		"pdfjs-dist": "^5.7.284"
 	}
 }

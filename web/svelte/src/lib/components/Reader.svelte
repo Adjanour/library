@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from "svelte";
     import { api } from "$lib/api";
+    import PdfReader from "$lib/components/PdfReader.svelte";
 
     let {
         item,
@@ -29,6 +30,23 @@
     let resizeObserver: ResizeObserver | null = null;
     let progressTimer: ReturnType<typeof setTimeout> | null = null;
     let mounted = true;
+    let pdfTotal = $state(0);
+    let pdfPage = $state(1);
+
+    function handlePdfReady(total: number) {
+        if (!mounted) return;
+        pdfTotal = total;
+        ready = true;
+        loading = false;
+    }
+    function handlePdfProgress(page: number, total: number) {
+        if (!mounted) return;
+        pdfPage = page;
+        pdfTotal = total;
+        currentPercent = total > 0 ? Math.round((page / total) * 100) : 0;
+        currentChapter = total > 0 ? `Page ${page} / ${total}` : "";
+        ready = true;
+    }
 
     // ── Reader settings (persisted in localStorage) ──────────────────────
     const FONT_SIZES = [80, 90, 100, 110, 125, 150, 175, 200];
@@ -259,7 +277,6 @@
         loadSettings();
         if (!viewer) return;
         if (isPdf) {
-            ready = true;
             loading = false;
             return;
         }
@@ -369,7 +386,7 @@
     });
 </script>
 
-<div class="fixed inset-0 bg-surface-0 z-40 flex flex-col" role="dialog" aria-label="EPUB reader">
+<div class="fixed inset-0 bg-surface-0 z-40 flex flex-col" role="dialog" aria-label={isPdf ? "PDF reader" : "EPUB reader"}>
     {#if !focusMode}
     <!-- Reader header -->
     <div class="flex items-center gap-2 px-4 py-2 border-b border-border bg-surface-1 shrink-0">
@@ -587,7 +604,9 @@
     <!-- Viewer -->
     <div class="flex-1 min-h-0 relative bg-surface-0">
         {#if isPdf}
-            <iframe src={`/api/file/${item.id}`} class="w-full h-full border-0" title={`PDF reader: ${item.title}`}></iframe>
+            <div class="absolute inset-0">
+                <PdfReader {item} onReady={handlePdfReady} onProgress={handlePdfProgress} />
+            </div>
         {:else if error}
             <div class="flex flex-col items-center justify-center h-full text-error text-sm p-8 text-center gap-2">
                 <div>Unable to load this EPUB.</div>
@@ -596,6 +615,8 @@
         {:else if loading}
             <div class="absolute inset-0 flex items-center justify-center text-text-muted text-sm pointer-events-none">Loading EPUB…</div>
         {/if}
-        <div bind:this={viewer} class="w-full h-full max-w-5xl mx-auto"></div>
+        {#if !isPdf}
+            <div bind:this={viewer} class="w-full h-full max-w-5xl mx-auto"></div>
+        {/if}
     </div>
 </div>
