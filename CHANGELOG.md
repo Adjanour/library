@@ -2,6 +2,19 @@
 
 All notable changes to Library are documented here.
 
+## [0.1.1] - 2026-09-26
+
+### Fixed
+
+- Added a review/apply metadata repair pass that only changes removable title noise and reliable EPUB-date or arXiv year fallbacks.
+- Added standards-aware EPUB cover fallback selection for books whose package metadata does not declare a cover.
+- Tightened arXiv filename matching so unrelated numeric filenames are not treated as paper years.
+
+### Validation
+
+- Applied 76 high-confidence metadata repairs across the local library database.
+- Rebuilt and reinstalled the Linux desktop bundle from the Deno flow.
+
 ## [0.1.0] - 2026-09-26
 
 ### Added
@@ -29,4 +42,3 @@ All notable changes to Library are documented here.
 - Svelte check passes with no errors; production frontend build passes.
 - Go scanner year/title tests and database tests pass.
 - The full Go suite retains one known machine-local first-page fixture mismatch for `2602.02734v2.pdf`; it was not changed as part of this release.
-

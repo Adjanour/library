@@ -13,10 +13,12 @@ type Suggestion = {
   yearSource?: string;
   confidence: "high" | "medium" | "low";
   reason: string;
+  applied?: string[];
 };
 
 const limit = Math.max(1, Number(Deno.args.find((arg) => arg.startsWith("--limit="))?.split("=")[1] ?? 1000));
 const type = Deno.args.find((arg) => arg.startsWith("--type="))?.split("=")[1];
+const apply = Deno.args.includes("--apply");
 const invisible = /[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/gu;
 const invisibleMarker = /[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/u;
 const suffixNoise = /\s*\(\s*(?:for\s+)?(?:true\s+epub|[.\s]*)\s*\)\s*$/iu;
@@ -57,7 +59,7 @@ for (const item of items) {
   if (!titleNeedsReview && !yearNeedsReview) continue;
 
   const highConfidenceTitle = titleNeedsReview && (invisibleMarker.test(item.title) || suffixNoise.test(item.title));
-  suggestions.push({
+  const suggestion: Suggestion = {
     id: item.id,
     filename: basename(item.filename),
     currentTitle: item.title,
@@ -66,7 +68,25 @@ for (const item of items) {
     ...(yearNeedsReview ? { suggestedYear: candidateYear, yearSource } : {}),
     confidence: highConfidenceTitle || yearSource === "epub-date" ? "high" : yearSource === "filename" ? "low" : "medium",
     reason: [titleNeedsReview && "metadata title contains removable noise", yearNeedsReview && `year available from ${yearSource}`].filter(Boolean).join("; "),
-  });
+  };
+
+  const updates: { title?: string; year?: number } = {};
+  if (highConfidenceTitle) updates.title = suggestedTitle;
+  if (yearNeedsReview && (yearSource === "arxiv-id" || yearSource === "epub-date")) {
+    updates.year = candidateYear;
+  }
+  if (apply && Object.keys(updates).length > 0) {
+    const result = db.updateItem(item.id, updates);
+    if (!result.ok) throw new Error(`Could not update item ${item.id}: ${result.error.message}`);
+    suggestion.applied = Object.keys(updates);
+  }
+  suggestions.push(suggestion);
 }
 
-console.log(JSON.stringify({ mode: "review-only", scanned: items.length, suggestions: suggestions.length, rows: suggestions }, null, 2));
+console.log(JSON.stringify({
+  mode: apply ? "apply" : "review-only",
+  scanned: items.length,
+  suggestions: suggestions.length,
+  applied: suggestions.filter((row) => row.applied?.length).length,
+  rows: suggestions,
+}, null, 2));
