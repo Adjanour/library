@@ -2,13 +2,16 @@
     import { onMount, onDestroy } from "svelte";
     import { api } from "$lib/api";
     import PdfReader from "$lib/components/PdfReader.svelte";
+    import { releaseEpub, warmEpub } from "$lib/epubCache";
 
     let {
         item,
         onClose,
+        onFinished,
     }: {
         item: { id: number; title: string; filename: string };
         onClose: () => void;
+        onFinished?: () => void;
     } = $props();
     let isPdf = $derived(item.filename.toLowerCase().endsWith(".pdf"));
 
@@ -30,8 +33,103 @@
     let resizeObserver: ResizeObserver | null = null;
     let progressTimer: ReturnType<typeof setTimeout> | null = null;
     let mounted = true;
+    let sessionStarted = false;
+    let sessionStart: Promise<unknown> = Promise.resolve();
+    let loadingStage = $state("Opening book…");
+    // Bumped on every reader change so a screenshot of the error text
+    // identifies exactly which build produced it.
+    const READER_BUILD = "epub-trace-5";
+    // Milestones reached during open; appended to any error so a failure
+    // can be localized (parse vs iframe-load vs layout) from a screenshot.
+    let trace: string[] = [];
+    let traceT0 = 0;
+    function note(step: string) {
+        if (!traceT0) traceT0 = performance.now();
+        trace.push(`${step}@${Math.round(performance.now() - traceT0)}ms`);
+    }
+    function fail(message: string) {
+        error = `${message} [trace: ${trace.join("→") || "none"}] [build ${READER_BUILD}]`;
+    }
+
+    // Load one minimal chapter through each iframe method the library
+    // supports and report which ones fire onload in THIS engine. Used only
+    // for diagnosis: the desktop webview hangs where desktop Chromium does
+    // not, and a screenshot of the result identifies the working method.
+    async function probeIframeMethods(): Promise<string> {
+        const html = "<!DOCTYPE html><html><head></head><body>probe</body></html>";
+        const results: string[] = [];
+        const attempt = (name: string, load: (frame: HTMLIFrameElement) => void): Promise<void> =>
+            new Promise((resolve) => {
+                let done = false;
+                const finish = (outcome: string) => {
+                    if (done) return;
+                    done = true;
+                    clearTimeout(timer);
+                    try { frame.remove(); } catch {}
+                    results.push(`${name}=${outcome}`);
+                    resolve();
+                };
+                const frame = document.createElement("iframe");
+                frame.style.cssText = "position:absolute;width:10px;height:10px;visibility:hidden";
+                const timer = setTimeout(() => finish("timeout"), 4000);
+                frame.onload = () => {
+                    try {
+                        const ok = !!frame.contentDocument?.body;
+                        finish(ok ? "ok" : "empty");
+                    } catch {
+                        finish("blocked");
+                    }
+                };
+                frame.onerror = () => finish("error");
+                document.body.appendChild(frame);
+                try {
+                    load(frame);
+                } catch {
+                    finish("threw");
+                }
+            });
+        await attempt("write", (frame) => {
+            const doc = frame.contentDocument;
+            if (!doc) throw new Error("no document");
+            doc.open();
+            doc.write(html);
+            doc.close();
+        });
+        await attempt("srcdoc", (frame) => {
+            frame.srcdoc = html;
+        });
+        await attempt("blobUrl", (frame) => {
+            frame.src = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+        });
+        const features = [
+            `RO=${typeof ResizeObserver}`,
+            `BLOB=${typeof Blob}:${typeof URL?.createObjectURL}`,
+        ].join(" ");
+        return `${results.join(" ")} ${features}`;
+    }
+
+    // Race any epub-js promise against a timeout: some failures (e.g. a
+    // stale saved position, or an iframe load that never fires in some
+    // webviews) never settle, which used to leave "Loading EPUB…" on screen
+    // forever. A timeout converts those into an actionable error instead.
+    function withTimeout<T>(promise: Promise<T>, ms: number, stage: string): Promise<T> {
+        let timer: ReturnType<typeof setTimeout>;
+        const timeout = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`${stage} timed out`)), ms);
+        });
+        return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+    }
     let pdfTotal = $state(0);
     let pdfPage = $state(1);
+    let finishSent = false;
+
+    function maybeFinishReading() {
+        if (finishSent || currentPercent < 100) return;
+        finishSent = true;
+        void api.finishReading(item.id).then(() => onFinished?.()).catch(() => {
+            finishSent = false;
+        });
+    }
 
     function handlePdfReady(total: number) {
         if (!mounted) return;
@@ -46,6 +144,7 @@
         currentPercent = total > 0 ? Math.round((page / total) * 100) : 0;
         currentChapter = total > 0 ? `Page ${page} / ${total}` : "";
         ready = true;
+        maybeFinishReading();
     }
 
     // ── Reader settings (persisted in localStorage) ──────────────────────
@@ -53,9 +152,9 @@
     const LINE_HEIGHTS = [1.35, 1.5, 1.65, 1.8, 2];
     const CONTENT_WIDTHS = [560, 640, 720, 840, 960];
     const FONT_FAMILIES: Record<string, string> = {
-        default: "",
-        serif: "Georgia, 'Times New Roman', serif",
-        sans: "'Helvetica Neue', Arial, sans-serif",
+        default: "'IBM Plex Serif', Georgia, 'Times New Roman', serif",
+        serif: "'IBM Plex Serif', Georgia, 'Times New Roman', serif",
+        sans: "'IBM Plex Sans', Inter, ui-sans-serif, system-ui, sans-serif",
         mono: "'JetBrains Mono', 'Courier New', monospace",
     };
     const THEMES: Record<string, { bg: string; fg: string }> = {
@@ -69,7 +168,7 @@
         fontSize: 100,
         fontFamily: "default",
         lineHeight: 1.65,
-        contentWidth: 840,
+        contentWidth: 720,
         theme: "light",
         spread: "none" as "none" | "both",
         flow: "paginated" as "paginated" | "scrolled",
@@ -142,6 +241,8 @@
     }
 
     function togglePanel(panel: "contents" | "bookmarks") {
+        // PDFs have their own toolbar/panels inside PdfReader.
+        if (isPdf) return;
         showSettings = false;
         showPanel = showPanel === panel ? null : panel;
     }
@@ -196,20 +297,48 @@
     }
 
     // ── Apply settings to rendition ──────────────────────────────────────
+    // NOTE: this @intity/epub-js fork has no themes.override() (the original
+    // epubjs does). Typography is baked into the registered theme rules and
+    // re-registered whenever a setting changes; select() early-returns when
+    // the theme name is unchanged, so it is detached and re-attached to
+    // force the fresh rules into every rendered section.
+    function themeBodyRules(t: { bg: string; fg: string }) {
+        const fam = FONT_FAMILIES[settings.fontFamily];
+        return {
+            background: t.bg,
+            color: t.fg,
+            "line-height": String(settings.lineHeight),
+            "max-width": `${settings.contentWidth}px`,
+            "margin-left": "auto",
+            "margin-right": "auto",
+            ...(fam ? { "font-family": `${fam} !important` } : {}),
+        };
+    }
+    function registerAllThemes() {
+        if (!rendition) return;
+        for (const [name, t] of Object.entries(THEMES)) {
+            rendition.themes.register(name, {
+                body: themeBodyRules(t),
+                p: { color: `${t.fg} !important`, "line-height": String(settings.lineHeight) },
+                a: { color: `${t.fg} !important` },
+            });
+        }
+    }
+    function reselectTheme() {
+        if (!rendition) return;
+        rendition.themes.select(null);
+        rendition.themes.select(settings.theme);
+    }
     function applyFontSize() {
         rendition?.themes.fontSize(`${settings.fontSize}%`);
     }
     function applyFontFamily() {
-        const fam = FONT_FAMILIES[settings.fontFamily];
-        if (fam) rendition?.themes.font(fam);
-        else rendition?.themes.override("font-family", "", true);
+        registerAllThemes();
+        reselectTheme();
     }
     function applyTypography() {
-        rendition?.themes.override("line-height", String(settings.lineHeight), true);
-        rendition?.themes.override("max-width", `${settings.contentWidth}px`, true);
-        rendition?.themes.override("margin-left", "auto", true);
-        rendition?.themes.override("margin-right", "auto", true);
-        applyFontFamily();
+        registerAllThemes();
+        reselectTheme();
     }
     function applyTheme() {
         rendition?.themes.select(settings.theme);
@@ -275,6 +404,9 @@
     onMount(async () => {
         window.addEventListener("keydown", onKey);
         loadSettings();
+        sessionStart = api.startReading(item.id).then(() => {
+            sessionStarted = true;
+        }).catch(() => {});
         if (!viewer) return;
         if (isPdf) {
             loading = false;
@@ -282,68 +414,111 @@
         }
 
         try {
-            // @ts-expect-error The package's browser bundle lacks a declaration file.
-            const ePub = (await import("@intity/epub-js/dist/public/epub.js")).default;
-            const response = await fetch(`/api/file/${item.id}`);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const buffer = await response.arrayBuffer();
-            book = ePub();
-            await book.open(buffer, "binary");
+            // Reuse the package warmed by the detail panel. This moves the
+            // archive download and ZIP parse before the user presses Read.
+            const warmed = await warmEpub(item.id);
+            book = warmed.book;
+            loadingStage = "Opening book…";
+            await withTimeout(book.loaded.sections, 30000, "Loading EPUB spine");
+            note("spine-ready");
 
             rendition = book.renderTo(viewer, {
                 width: "100%",
                 height: "100%",
+                method: "srcdoc",
                 spread: settings.spread,
                 flow: settings.flow,
             });
 
-            // Register themes
-            for (const [name, t] of Object.entries(THEMES)) {
-                rendition.themes.register(name, {
-                    body: { background: t.bg, color: t.fg },
-                    p: { color: `${t.fg} !important` },
-                    a: { color: `${t.fg} !important` },
-                });
-            }
+            // Register themes (typography baked in — see themeBodyRules)
+            registerAllThemes();
             rendition.themes.select(settings.theme);
 
             book.on("openFailed", (cause: unknown) => {
                 if (mounted) {
                     loading = false;
-                    error = cause instanceof Error ? cause.message : "Unable to open this EPUB archive.";
+                    fail(cause instanceof Error ? cause.message : "Unable to open this EPUB archive.");
                 }
             });
             rendition.on("displayerror", (cause: unknown) => {
                 if (mounted) {
                     loading = false;
-                    error = cause instanceof Error ? cause.message : "Unable to render this EPUB.";
+                    fail(cause instanceof Error ? cause.message : "Unable to render this EPUB.");
                 }
             });
             rendition.on("loaderror", (cause: unknown) => {
                 if (mounted) {
                     loading = false;
-                    error = cause instanceof Error ? cause.message : "Unable to load this EPUB section.";
+                    fail(cause instanceof Error ? cause.message : "Unable to load this EPUB section.");
                 }
             });
 
             rendition.on("relocated", (location: any) => {
                 if (!mounted) return;
+                note("relocated");
                 if (location?.percentage) {
                     currentPercent = Math.round(location.percentage * 100);
                 }
                 currentCfi = location?.start?.cfi || "";
                 currentChapter = location?.start?.href?.split("#")[0]?.split("/").pop()?.replace(/\.(xhtml|html?)$/i, "") || "";
+                maybeFinishReading();
                 queueProgressSync();
             });
+            rendition.on("rendered", () => {
+                if (mounted) note("rendered");
+            });
+            // Stage markers inside the library's own pipeline: section hooks
+            // fire during Section.load/render, rendition hooks after the
+            // chapter iframe loads. The last marker in a failure trace is
+            // the call that never returned.
+            try {
+                book.sections.hooks?.content?.register(() => {
+                    note("section-content");
+                });
+                book.sections.hooks?.serialize?.register(() => {
+                    note("serialize");
+                });
+            } catch {}
+            try {
+                rendition.hooks.content.register(() => {
+                    note("rendition-content");
+                });
+            } catch {}
 
-            await book.loaded.sections;
+            loadingStage = "Loading first chapter…";
             const firstSection = book.sections.get(0);
             if (!firstSection) throw new Error("This EPUB has no readable chapters.");
-            let savedPosition = "";
-            try { savedPosition = localStorage.getItem(`library:epub-position:${item.id}`) || ""; } catch {}
-            if (savedPosition) await rendition.display(savedPosition);
-            else await rendition.display(0);
-            book.ready.then(() => {
+            let rawSaved = "";
+            try { rawSaved = localStorage.getItem(`library:epub-position:${item.id}`) || ""; } catch {}
+            // Only well-formed CFIs are worth attempting; anything else goes
+            // straight to the first page instead of erroring or hanging.
+            const savedPosition = rawSaved.indexOf("epubcfi(") === 0 ? rawSaved : "";
+            if (savedPosition) {
+                loadingStage = "Restoring position…";
+                try {
+                    await withTimeout(
+                        rendition.display(savedPosition),
+                        15000,
+                        `Restoring position (saved: ${savedPosition.slice(0, 100)})`,
+                    );
+                    note("restored");
+                } catch {
+                    // Drop the stale position FIRST: the failed display task
+                    // can leave the rendition queue stuck, so a retry in the
+                    // same session must never attempt it again.
+                    try { localStorage.removeItem(`library:epub-position:${item.id}`); } catch {}
+                    loadingStage = "Opening first page…";
+                    await withTimeout(rendition.display(0), 20000, "Opening first page");
+                    note("first-page-after-fallback");
+                }
+            } else {
+                loadingStage = "Opening first page…";
+                await withTimeout(rendition.display(0), 20000, "Opening first page");
+                note("first-page");
+            }
+            // NOTE: this @intity/epub-js fork has no book.ready promise
+            // (the original epubjs does) — navigation is awaited explicitly.
+            book.loaded.navigation.then(() => {
                 if (!mounted) return;
                 contents = (book.navigation?.toc || []).flatMap((entry: any) => [
                     { label: entry.label?.trim() || "Untitled section", href: entry.href },
@@ -367,7 +542,18 @@
 
         } catch (e) {
             loading = false;
-            error = e instanceof Error ? e.message : "Unable to load this EPUB.";
+            // If we never got past displaying, find out which iframe load
+            // methods this engine supports so the next build can use one.
+            if (!trace.includes("relocated") && !trace.includes("rendered")) {
+                loadingStage = "Diagnosing engine…";
+                try {
+                    const probe = await probeIframeMethods();
+                    trace.push(`probe:${probe}`);
+                } catch {
+                    trace.push("probe:failed");
+                }
+            }
+            fail(e instanceof Error ? e.message : "Unable to load this EPUB.");
         }
 
         resizeObserver = new ResizeObserver(() => {
@@ -382,7 +568,12 @@
         if (progressTimer) clearTimeout(progressTimer);
         resizeObserver?.disconnect();
         rendition?.destroy();
-        book?.destroy();
+        releaseEpub(item.id);
+        if (sessionStarted) {
+            void api.stopReading(item.id).catch(() => {});
+        } else {
+            void sessionStart.then(() => api.stopReading(item.id)).catch(() => {});
+        }
     });
 </script>
 
@@ -613,7 +804,7 @@
                 <div class="text-xs text-text-muted max-w-md">{error}</div>
             </div>
         {:else if loading}
-            <div class="absolute inset-0 flex items-center justify-center text-text-muted text-sm pointer-events-none">Loading EPUB…</div>
+            <div class="absolute inset-0 flex flex-col gap-1 items-center justify-center text-text-muted text-sm pointer-events-none"><div>Loading EPUB…</div><div class="text-xs opacity-70">{loadingStage}</div></div>
         {/if}
         {#if !isPdf}
             <div bind:this={viewer} class="w-full h-full max-w-5xl mx-auto"></div>

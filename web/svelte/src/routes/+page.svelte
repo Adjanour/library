@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { api, type Item, type Stats, type CategoryCount, type TagCount, type ReadingDashboard, type ReadingProgress, type ReadingSession } from '$lib/api';
+  import { api, type Item, type Stats, type CategoryCount, type TagCount, type ReadingDashboard, type ReadingProgress, type ReadingSession, type ReadingQueueItem } from '$lib/api';
   import Sidebar from '$lib/components/Sidebar.svelte';
   import Toolbar from '$lib/components/Toolbar.svelte';
   import BookCard from '$lib/components/BookCard.svelte';
@@ -8,6 +8,7 @@
   import DetailPanel from '$lib/components/DetailPanel.svelte';
   import Reader from '$lib/components/Reader.svelte';
   import Modals from '$lib/components/Modals.svelte';
+  import CommandPalette from '$lib/components/CommandPalette.svelte';
 
   let query = $state(''), activeType = $state(''), activeCategory = $state('');
   let activeTag = $state(''), activePurpose = $state(''), sortBy = $state('');
@@ -22,9 +23,11 @@
   let loading = $state(false);
   let selectedProgress = $state<ReadingProgress | null>(null);
   let selectedSessions = $state<ReadingSession[]>([]);
-  let activeSession = $state<{ item_id: number; session_id: number } | null>(null);
   let showDeleteModal = $state(false), showKeybindings = $state(false);
+  let showCommandPalette = $state(false);
   let readingItem = $state<Item | null>(null);
+  let draggedQueueId = $state<number | null>(null);
+  let queueDropId = $state<number | null>(null);
   let theme = $state<'dark' | 'light'>(typeof window !== 'undefined'
     ? (localStorage.getItem('theme') as 'dark' | 'light') ||
       (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : 'dark');
@@ -55,12 +58,59 @@
     try { selectedSessions = await api.readingSessions(item.id); } catch { selectedSessions = []; }
   }
   function selectItem(item: Item) { selectedItem = item; if (view === 'reading') view = 'grid'; loadProgress(item); }
+  function continueReading(item: Item) {
+    selectedItem = item;
+    loadProgress(item);
+    readingItem = item;
+  }
+  async function readQueueItem(queueItem: ReadingQueueItem) {
+    if (!queueItem.item_id) return;
+    try {
+      const item = await api.item(queueItem.item_id);
+      continueReading(item);
+    } catch (e) { console.error(e); }
+  }
+  async function skipQueueItem(queueItem: ReadingQueueItem) {
+    if (!window.confirm(`Remove "${queueItem.title}" from your reading queue?`)) return;
+    try {
+      await api.removeFromQueue(queueItem.id);
+      await loadDashboard();
+    } catch (e) { console.error(e); }
+  }
+  async function reorderQueue(targetId: number) {
+    if (!dashboard || draggedQueueId === null || draggedQueueId === targetId) return;
+    const ids = dashboard.queue.map((item) => item.id);
+    const from = ids.indexOf(draggedQueueId);
+    const to = ids.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    ids.splice(from, 1);
+    ids.splice(to, 0, draggedQueueId);
+    draggedQueueId = null;
+    queueDropId = null;
+    try {
+      await api.reorderQueue(ids);
+      await loadDashboard();
+    } catch (e) { console.error(e); await loadDashboard(); }
+  }
   function handleQueryInput(e: Event) { query = (e.target as HTMLInputElement).value; page = 1; search(); }
   function handleSearch(e: Event) { e.preventDefault(); page = 1; search(); }
   function selectType(t: string) { activeType = t; activeCategory = ''; activeTag = ''; activePurpose = ''; page = 1; search(); }
   function selectCategory(c: string) { activeCategory = c; page = 1; search(); }
   function selectTag(t: string) { activeTag = t; page = 1; search(); }
   function selectPurpose(p: string) { activePurpose = p; page = 1; search(); }
+  function clearFilters() { query = ''; activeType = ''; activeCategory = ''; activeTag = ''; activePurpose = ''; page = 1; search(); }
+  function removeFilter(kind: 'query' | 'type' | 'category' | 'tag' | 'purpose') {
+    if (kind === 'query') query = '';
+    if (kind === 'type') activeType = '';
+    if (kind === 'category') activeCategory = '';
+    if (kind === 'tag') activeTag = '';
+    if (kind === 'purpose') activePurpose = '';
+    page = 1; search();
+  }
+  async function queueSelected() {
+    if (!selectedItem) return;
+    try { await api.addToQueue({ item_id: selectedItem.id }); await loadDashboard(); } catch (e) { console.error(e); }
+  }
   function toggleTheme() { theme = theme === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', theme); localStorage.setItem('theme', theme); }
   function togglePreviewPanel() { showPreviewPanel = !showPreviewPanel;
@@ -91,13 +141,18 @@
   async function onSaved(u: Item) { selectedItem = u; items = items.map((i) => (i.id === u.id ? u : i)); await loadSidebarData(); }
   async function deleteItem() { if (!selectedItem) return;
     try { await api.delete(selectedItem.id); selectedItem = null; showDeleteModal = false; search(); loadSidebarData(); } catch (e) { console.error(e); } }
+  async function quitApp() {
+    try { await api.quit(); } catch { /* server exits; the fetch aborts */ }
+    try { window.close(); } catch { /* webview may refuse; user can close the window */ }
+  }
 
   function handleKeydown(e: KeyboardEvent) {
     const t = e.target as HTMLElement;
     const isInput = t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); showCommandPalette = true; return; }
     if (e.key === '/' && !isInput) { e.preventDefault(); document.getElementById('search-input')?.focus(); return; }
     if (e.key === 'Escape') {
-      if (readingItem) readingItem = null; else if (showDeleteModal) showDeleteModal = false;
+      if (showCommandPalette) showCommandPalette = false; else if (readingItem) readingItem = null; else if (showDeleteModal) showDeleteModal = false;
       else if (showKeybindings) showKeybindings = false; else if (selectedItem) selectedItem = null;
       else (document.activeElement as HTMLElement)?.blur(); return;
     }
@@ -114,6 +169,20 @@
     if (e.key === 'p') togglePreviewPanel();
     if (e.key === '?') showKeybindings = true;
   }
+  let hasFilters = $derived(!!query || !!activeType || !!activeCategory || !!activeTag || !!activePurpose);
+  let commands = $derived([
+    { id: 'search', label: 'Focus search', hint: 'Search titles, authors, and metadata', shortcut: '/', run: () => document.getElementById('search-input')?.focus() },
+    { id: 'grid', label: 'Show grid view', hint: 'See more covers at a glance', shortcut: 'g', run: () => view = 'grid' },
+    { id: 'list', label: 'Show list view', hint: 'Scan dense metadata quickly', shortcut: 'l', run: () => view = 'list' },
+    { id: 'dashboard', label: 'Open reading dashboard', hint: 'Queue and continue reading', shortcut: 'b', run: () => { view = 'reading'; loadDashboard(); } },
+    { id: 'read', label: 'Read selected book', hint: selectedItem?.title || 'Select a book first', shortcut: 'r', run: () => { if (selectedItem) readingItem = selectedItem; } },
+    { id: 'open', label: 'Open selected file', hint: selectedItem?.title || 'Select a book first', shortcut: 'o', run: () => { if (selectedItem) api.open(selectedItem.id); } },
+    { id: 'queue', label: 'Add selected to queue', hint: selectedItem?.title || 'Select a book first', run: queueSelected },
+    { id: 'preview', label: 'Toggle preview panel', hint: 'Show or hide book details', shortcut: 'p', run: togglePreviewPanel },
+    { id: 'clear', label: 'Clear search and filters', hint: 'Return to the full library', run: clearFilters },
+    { id: 'rescan', label: 'Rescan library', hint: 'Refresh files and metadata', shortcut: 'R', run: rescan },
+    { id: 'theme', label: 'Toggle theme', hint: 'Switch between light and dark', run: toggleTheme },
+  ]);
   $effect(() => { document.documentElement.setAttribute('data-theme', theme); });
   onMount(() => { search(); loadSidebarData(); window.addEventListener('keydown', handleKeydown); });
   onDestroy(() => { window.removeEventListener('keydown', handleKeydown); });
@@ -131,8 +200,8 @@
     <Toolbar {query} {view} {theme} {loading} {showPreviewPanel}
       onQueryInput={handleQueryInput} onSearch={handleSearch}
       onViewChange={(v) => { view = v; if (v === 'reading') loadDashboard(); }}
-      onToggleTheme={toggleTheme} onRescan={rescan} onShowKeybindings={() => (showKeybindings = true)}
-      onTogglePreview={togglePreviewPanel} />
+      onToggleTheme={toggleTheme} onRescan={rescan} onShowCommands={() => (showCommandPalette = true)} onShowKeybindings={() => (showKeybindings = true)}
+      onTogglePreview={togglePreviewPanel} onQuit={quitApp} />
     <div class="px-3 py-1.5 border-b border-border flex items-center gap-2">
       <select bind:value={sortBy} onchange={() => { page = 1; search(); }} class="bg-surface-2 border border-border rounded px-2 py-1 text-xs text-text-secondary cursor-pointer">
         <option value="">Sort: Title</option><option value="year">Sort: Year</option>
@@ -148,6 +217,17 @@
       <div class="flex-1"></div>
       <span class="text-[10px] text-text-muted">{total} items</span>
     </div>
+    {#if hasFilters}
+      <div class="flex items-center gap-1.5 border-b border-border px-3 py-1.5 text-[10px]" aria-label="Active filters">
+        <span class="text-text-muted shrink-0">Filtered by</span>
+        {#if query}<button class="rounded bg-accent/10 px-1.5 py-0.5 text-accent hover:bg-accent/20" onclick={() => removeFilter('query')}>“{query}” ×</button>{/if}
+        {#if activeType}<button class="rounded bg-accent/10 px-1.5 py-0.5 text-accent hover:bg-accent/20" onclick={() => removeFilter('type')}>{activeType} ×</button>{/if}
+        {#if activeCategory}<button class="rounded bg-accent/10 px-1.5 py-0.5 text-accent hover:bg-accent/20" onclick={() => removeFilter('category')}>{activeCategory} ×</button>{/if}
+        {#if activeTag}<button class="rounded bg-accent/10 px-1.5 py-0.5 text-accent hover:bg-accent/20" onclick={() => removeFilter('tag')}>{activeTag} ×</button>{/if}
+        {#if activePurpose}<button class="rounded bg-accent/10 px-1.5 py-0.5 text-accent hover:bg-accent/20" onclick={() => removeFilter('purpose')}>{activePurpose} ×</button>{/if}
+        <button class="ml-auto text-text-muted hover:text-text-primary" onclick={clearFilters}>Clear</button>
+      </div>
+    {/if}
     <div class="flex-1 overflow-y-auto">
       {#if loading && items.length === 0}
         <div class="p-4 text-center text-text-muted text-sm">Loading…</div>
@@ -160,7 +240,10 @@
       {:else}
         <div class="grid grid-cols-2 gap-2 p-2">
           {#each items as item (item.id)}
-            <BookCard {item} isSelected={selectedItem?.id === item.id} {query} onClick={selectItem} />
+          <BookCard {item} isSelected={selectedItem?.id === item.id} {query}
+            isReading={!!dashboard?.currently_reading.some((entry) => entry.item.id === item.id)}
+            progressPercent={dashboard?.currently_reading.find((entry) => entry.item.id === item.id)?.progress.progress_percent || 0}
+            onClick={selectItem} onRead={continueReading} />
           {/each}
         </div>
       {/if}
@@ -199,43 +282,76 @@
             <div class="bg-surface-1 border border-border rounded-lg p-3"><div class="text-2xl font-bold">{dashboard.week_reading_minutes}m</div><div class="text-[10px] text-text-muted uppercase">This week</div></div>
           </div>
           {#if dashboard.currently_reading.length > 0}
-            <h3 class="text-sm font-semibold mb-2">Currently Reading</h3>
+            <h3 class="text-sm font-semibold mb-2">Continue Reading</h3>
             <div class="space-y-2 mb-6">
-              {#each dashboard.currently_reading as cr}
-                <button class="w-full text-left bg-surface-1 border border-border rounded-lg p-3 hover:border-accent/50 transition-colors" onclick={() => { view = 'grid'; selectItem(cr.item); }}>
-                  <div class="flex items-center justify-between mb-1"><span class="text-sm font-medium truncate">{cr.item.title}</span><span class="text-xs text-text-muted">{cr.progress.progress_percent}%</span></div>
-                  <div class="h-1 bg-surface-3 rounded-full overflow-hidden"><div class="h-full bg-accent" style="width: {cr.progress.progress_percent}%"></div></div>
+              {#each dashboard.currently_reading as cr, index}
+                <button class="w-full text-left bg-surface-1 border border-border rounded-lg p-3 hover:border-accent/50 transition-colors" onclick={() => continueReading(cr.item)}>
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="text-sm font-medium truncate">{cr.item.title}</span>
+                    <span class="text-xs text-text-muted">{cr.progress.progress_percent}%</span>
+                  </div>
+                  <div class="text-[10px] text-text-muted mb-2">{index === 0 ? 'Up next' : 'In progress'} · {cr.item.authors || 'Unknown author'}</div>
+                  <div class="h-1.5 bg-surface-3 rounded-full overflow-hidden"><div class="h-full bg-accent" style="width: {cr.progress.progress_percent}%"></div></div>
                 </button>
               {/each}
             </div>
+          {:else}
+            <div class="mb-6 rounded-lg border border-dashed border-border p-4 text-sm text-text-muted">Nothing in progress yet. Pick a book from your queue to begin.</div>
           {/if}
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-sm font-semibold">Read Next</h3>
+            {#if dashboard.queue.length > 0}<span class="text-[10px] text-text-muted">{dashboard.queue.length} queued</span>{/if}
+          </div>
           {#if dashboard.queue.length > 0}
-            <h3 class="text-sm font-semibold mb-2">Reading Queue</h3>
-            <div class="space-y-1">
+            <div class="space-y-1" role="list" aria-label="Reading queue">
               {#each dashboard.queue as q}
-                <div class="flex items-center gap-2 text-sm bg-surface-1 border border-border rounded px-3 py-2">
-                  <span class="text-text-muted text-xs">#{q.priority}</span><span class="truncate flex-1">{q.title}</span><span class="text-xs text-text-muted">{q.author}</span>
+                <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                <div
+                  class="flex items-center gap-2 text-sm bg-surface-1 border border-border rounded px-3 py-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
+                  class:border-accent={queueDropId === q.id}
+                  draggable="true"
+                  role="listitem"
+                  tabindex="0"
+                  onkeydown={(event) => { if (event.key === 'Enter') readQueueItem(q); if (event.key === 'Delete') skipQueueItem(q); }}
+                  ondragstart={() => (draggedQueueId = q.id)}
+                  ondragover={(event) => { event.preventDefault(); queueDropId = q.id; }}
+                  ondragleave={() => { if (queueDropId === q.id) queueDropId = null; }}
+                  ondrop={(event) => { event.preventDefault(); reorderQueue(q.id); }}
+                  ondragend={() => { draggedQueueId = null; queueDropId = null; }}
+                >
+                  <span class="text-text-muted cursor-grab" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</span>
+                  <span class="text-text-muted text-xs w-5">#{q.priority + 1}</span>
+                  <div class="min-w-0 flex-1"><div class="truncate">{q.title}</div><div class="text-[10px] text-text-muted truncate">{q.author || 'Unknown author'}</div></div>
+                  {#if q.item_id}
+                    <button class="px-2 py-1 text-[10px] rounded bg-accent/20 text-accent hover:bg-accent/30" onclick={() => readQueueItem(q)}>Read</button>
+                  {/if}
+                  <button class="px-2 py-1 text-[10px] rounded text-text-muted hover:bg-surface-3 hover:text-text-primary" title="Skip this book" onclick={() => skipQueueItem(q)}>Skip</button>
                 </div>
               {/each}
             </div>
+          {:else}
+            <div class="rounded-lg border border-dashed border-border p-4 text-sm text-text-muted">Your reading queue is empty.</div>
           {/if}
         </div>
       {:else}
-        <DetailPanel item={selectedItem} progress={selectedProgress} sessions={selectedSessions} {activeSession}
+        <DetailPanel item={selectedItem} progress={selectedProgress} sessions={selectedSessions}
+          isQueued={!!dashboard?.queue.some((queueItem) => queueItem.item_id === selectedItem?.id)}
           onOpen={(item) => api.open(item.id)}
           onDelete={(item) => { selectedItem = item; showDeleteModal = true; }}
           onRead={(item) => (readingItem = item)}
           onSaved={onSaved}
           onProgressChanged={() => selectedItem && loadProgress(selectedItem)}
-          onSessionChanged={() => selectedItem && loadProgress(selectedItem)} />
+          onQueueChanged={loadDashboard} />
       {/if}
     </div>
   {/if}
 </div>
 
 {#if readingItem}
-  <Reader item={readingItem} onClose={() => (readingItem = null)} />
+  <Reader item={readingItem} onClose={() => (readingItem = null)} onFinished={() => { loadDashboard(); }} />
 {/if}
 
 <Modals showDelete={showDeleteModal} showKeybindings={showKeybindings} itemTitle={selectedItem?.title || ''}
   onConfirmDelete={deleteItem} onCancelDelete={() => (showDeleteModal = false)} onCloseKeybindings={() => (showKeybindings = false)} />
+{#if showCommandPalette}<CommandPalette commands={commands} onClose={() => (showCommandPalette = false)} />{/if}

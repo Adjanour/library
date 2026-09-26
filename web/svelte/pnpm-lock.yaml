@@ -8,6 +8,12 @@ importers:
 
   .:
     dependencies:
+      '@fontsource/ibm-plex-sans':
+        specifier: ^5.3.0
+        version: 5.3.0
+      '@fontsource/ibm-plex-serif':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@intity/epub-js':
         specifier: ^0.3.98
         version: 0.3.98
@@ -117,6 +123,12 @@ packages:
     peerDependenciesMeta:
       '@noble/hashes':
         optional: true
+
+  '@fontsource/ibm-plex-sans@5.3.0':
+    resolution: {integrity: sha512-CbE4CbbEEZJX860XyUiRpsksXIQR8Rp2XDva2VO53NJox9tVNtusrysd2x5YkUEY3ErQ66W1IiiQL8/wihhw5w==}
+
+  '@fontsource/ibm-plex-serif@5.3.0':
+    resolution: {integrity: sha512-zwPfHB7EJbS5B8qnitPigJYzNdnt6PUeaoOA1gAAt//1pjpTVZN5sOU14NIAZ+C1xypL6GWsUG2VMYJW9bhJqQ==}
 
   '@intity/epub-js@0.3.98':
     resolution: {integrity: sha512-ljDtKgJZqi736oIXEqF40vsirGSRhEIbjcf830W97Wt2asDoObzKqhMMiF3BLKQ6+BE0QDOdjbk5E0wWsCobVA==}
@@ -1219,6 +1231,10 @@ snapshots:
   '@csstools/css-tokenizer@4.0.1': {}
 
   '@exodus/bytes@1.16.0': {}
+
+  '@fontsource/ibm-plex-sans@5.3.0': {}
+
+  '@fontsource/ibm-plex-serif@5.3.0': {}
 
   '@intity/epub-js@0.3.98':
     dependencies:

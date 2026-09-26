@@ -144,6 +144,7 @@ export const api = {
   updateItem: (id: number, updates: ItemUpdate) => put<Item>(`/api/items/${id}`, updates),
   delete: (id: number) => del(`/api/items/${id}`),
   scan: () => post<{ indexed: number; total: number }>('/api/scan'),
+  quit: () => post<{ status: string }>('/api/quit'),
   tags: () => get<TagCount[]>('/api/tags'),
   purposes: () => get<TagCount[]>('/api/purposes'),
 

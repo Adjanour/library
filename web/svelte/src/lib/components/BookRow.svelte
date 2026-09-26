@@ -11,8 +11,11 @@
 </script>
 
 <button
-  class="w-full text-left px-3 py-2 border-b border-border hover:bg-surface-2 transition-colors flex items-center gap-2"
+  data-item-id={item.id}
+  class="w-full text-left px-3 py-2 border-b border-l-2 border-l-transparent border-border hover:bg-surface-2 transition-colors flex items-center gap-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
   class:bg-surface-2={isSelected}
+  class:border-l-accent={isSelected}
+  aria-pressed={isSelected}
   onclick={() => onClick(item)}
 >
   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" class="shrink-0 text-text-muted">

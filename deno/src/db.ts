@@ -496,6 +496,8 @@ export class DB {
   // Reading Sessions
 
   startReadingSession(itemID: number): ReadingSession {
+    const active = this.getActiveSession(itemID);
+    if (active) return active;
     const result = this.conn.prepare(`
       INSERT INTO reading_sessions (item_id, started_at) VALUES (?, CURRENT_TIMESTAMP)
     `).run(itemID);
@@ -535,6 +537,21 @@ export class DB {
   }
 
   addToReadingQueue(item: ReadingQueueItem): void {
+    if (item.item_id !== null && item.item_id !== undefined) {
+      const existing = this.conn.prepare(
+        "SELECT id FROM reading_queue WHERE item_id = ? LIMIT 1"
+      ).get(item.item_id) as { id: number } | undefined;
+      if (existing) {
+        item.id = existing.id;
+        return;
+      }
+    }
+    if (item.priority === 0) {
+      const next = this.conn.prepare(
+        "SELECT COALESCE(MAX(priority) + 1, 0) as priority FROM reading_queue"
+      ).get() as { priority: number };
+      item.priority = next.priority;
+    }
     this.conn.prepare(`
       INSERT INTO reading_queue (item_id, focusd_book_number, title, author, priority) VALUES (?, ?, ?, ?, ?)
     `).run(item.item_id, item.focusd_book_number, item.title, item.author, item.priority);
@@ -559,6 +576,7 @@ export class DB {
     this.conn.prepare(`
       UPDATE reading_progress SET status = 'finished', progress_percent = 100, finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE item_id = ?
     `).run(itemID);
+    this.conn.prepare("DELETE FROM reading_queue WHERE item_id = ?").run(itemID);
     const session = this.getActiveSession(itemID);
     if (session) {
       this.stopReadingSession(session.id, 0);

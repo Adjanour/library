@@ -30,7 +30,7 @@ my-app/
   "tasks": {
     "dev": "deno run --allow-all --watch src/main.ts",
     "desktop": "deno desktop --allow-all --include ../web/static src/main.ts",
-    "build:frontend": "cd ../web/svelte && npm run build"
+    "build:frontend": "cd ../web/svelte && pnpm run build"
   },
   "desktop": {
     "app": {
@@ -111,7 +111,7 @@ const staticDir = join(
 For SvelteKit with adapter-static:
 
 ```bash
-cd web/svelte && npm run build
+cd web/svelte && pnpm install --frozen-lockfile && pnpm run build
 ```
 
 Output goes to `web/static/` (configured in `svelte.config.js`).

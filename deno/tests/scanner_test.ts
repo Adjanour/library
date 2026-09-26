@@ -37,6 +37,9 @@ Deno.test("extractYear finds 4-digit years", () => {
     { input: "no year.pdf", want: 0 },
     { input: "invalid 1800.pdf", want: 0 },
     { input: "future 2050.pdf", want: 0 },
+    { input: "1912.13318v5.pdf", want: 2019 },
+    { input: "paper 2024 (preprint).pdf", want: 2024 },
+    { input: "361598.361623.pdf", want: 0 },
   ];
 
   for (const { input, want } of cases) {

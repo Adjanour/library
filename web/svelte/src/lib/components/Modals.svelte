@@ -16,6 +16,7 @@
   } = $props();
 
   const shortcuts = [
+    ['Ctrl / Cmd + K', 'Open command palette'],
     ['/', 'Focus search'],
     ['j / k', 'Navigate list'],
     ['Enter / o', 'Open in reader'],

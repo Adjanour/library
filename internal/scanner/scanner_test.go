@@ -60,6 +60,8 @@ func TestExtractYear(t *testing.T) {
 		{"no year.pdf", 0},
 		{"invalid 1800.pdf", 0},
 		{"future 2050.pdf", 0},
+		{"1912.13318v5.pdf", 2019},
+		{"361598.361623.pdf", 0},
 	}
 
 	for _, tt := range tests {

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/bernard/library/internal/db"
 	"github.com/bernard/library/internal/models"
@@ -24,13 +25,14 @@ var (
 	affiliationRE = regexp.MustCompile(`(?i)^\s*\d+\s+[a-z]|(university|institute|department|research\s+(scientist|fellow|assistant|engineer)|lab[\s,]|google|microsoft|amazon|ibm|meta\s|apple[,\.]|inc[\.\s]|ltd[\.\s]|corp[\.\s])`)
 
 	// extractTitle regexes (compiled once, not per-call)
-	zlibrarySK   = regexp.MustCompile(`\s*\(z-library\.sk.*?\)\s*`)
-	zlibOrg      = regexp.MustCompile(`\s*\(z-lib\.org.*?\)\s*`)
-	oneLibSK     = regexp.MustCompile(`\s*\(1lib\.sk.*?\)\s*`)
-	zlibraryCap  = regexp.MustCompile(`\s*\(Z-Library\)\s*`)
-	trailingNums = regexp.MustCompile(`\s*\(\d+\)\s*$`)
-	parens       = regexp.MustCompile(`\([^)]*\)`)
-	whitespace   = regexp.MustCompile(`\s+`)
+	zlibrarySK          = regexp.MustCompile(`\s*\(z-library\.sk.*?\)\s*`)
+	zlibOrg             = regexp.MustCompile(`\s*\(z-lib\.org.*?\)\s*`)
+	oneLibSK            = regexp.MustCompile(`\s*\(1lib\.sk.*?\)\s*`)
+	zlibraryCap         = regexp.MustCompile(`\s*\(Z-Library\)\s*`)
+	trailingNums        = regexp.MustCompile(`\s*\(\d+\)\s*$`)
+	parens              = regexp.MustCompile(`\([^)]*\)`)
+	whitespace          = regexp.MustCompile(`\s+`)
+	metadataSuffixNoise = regexp.MustCompile(`(?i)\s*\(\s*(?:for\s+)?(?:true\s+epub|[.\s]*)\s*\)\s*$`)
 )
 
 // Additional bad-metadata detection regexes
@@ -175,6 +177,14 @@ func isBadMetadata(s string) bool {
 // cleanMetadata strips control characters and tidies up extracted text.
 func cleanMetadata(s string) string {
 	s = nonPrintable.ReplaceAllString(s, "")
+	s = strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)
+	s = metadataSuffixNoise.ReplaceAllString(s, "")
+	s = whitespace.ReplaceAllString(s, " ")
 	s = strings.TrimSpace(s)
 	return s
 }
@@ -496,7 +506,13 @@ func extractAuthors(filename string) string {
 }
 
 func extractYear(filename string) int {
-	matches := yearRegex.FindAllString(filename, -1)
+	if match := arxivID.FindStringSubmatch(filename); len(match) > 1 {
+		year, err := strconv.Atoi("20" + match[1][:2])
+		if err == nil && year >= 2007 && year <= 2030 {
+			return year
+		}
+	}
+	matches := yearRegex.FindAllString(arxivID.ReplaceAllString(filename, ""), -1)
 	for _, m := range matches {
 		year, err := strconv.Atoi(m)
 		if err == nil && year >= 1900 && year <= 2030 {
@@ -506,7 +522,7 @@ func extractYear(filename string) int {
 	return 0
 }
 
-var arxivID = regexp.MustCompile(`\d{4}\.\d{4,}(v\d+)?`)
+var arxivID = regexp.MustCompile(`(?:^|[^0-9])([0-9]{4}\.[0-9]{4,}(v[0-9]+)?)`)
 
 func guessType(path, filename string) models.BookType {
 	lowerPath := strings.ToLower(path)

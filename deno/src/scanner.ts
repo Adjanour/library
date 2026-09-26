@@ -11,8 +11,8 @@ const SUPPORTED_EXTENSIONS: Record<string, BookType> = {
   ".djvu": "book",
 };
 
-const ARXIV_ID = /\d{4}\.\d{4,}(v\d+)?/;
-const YEAR_RE = /\b(19|20)\d{2}\b/;
+const ARXIV_ID = /(?<!\d)\d{4}\.\d{4,}(v\d+)?/;
+const YEAR_RE = /\b(?:19|20)\d{2}\b(?![.,]\d)/;
 const AUTHOR_PARENS = /\(([^)]+)\)/g;
 const ZLIBRARY_SK = /\s*\(z-library\.sk.*?\)\s*/g;
 const ZLIB_ORG = /\s*\(z-lib\.org.*?\)\s*/g;
@@ -23,6 +23,8 @@ const PARENS = /\([^)]*\)/g;
 const CLEAN_TITLE = /[_\-,.]+/g;
 const WHITESPACE = /\s+/g;
 const NON_PRINTABLE = /[\x00-\x08\x0e-\x1f\x7f-\x9f]/g;
+const INVISIBLE_FORMAT = `[\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\uFEFF]`;
+const METADATA_SUFFIX_NOISE = new RegExp(`\\s*\\(\\s*(?:for\\s+)?(?:true\\s+epub|${INVISIBLE_FORMAT}|[.\\s])*\\s*\\)\\s*$`, "iu");
 const BAD_TITLE = /^(course\s*name|anonymous|microsoft\s+word\s*-|\.rtf$|^[\d\s]+$|^[\.\-\s]+$)/i;
 const ISBN = /^[\d][\d\s-]{8,}[\dXx]$/;
 const DATE_STAMP = /^\d{1,4}[/-]\d{1,2}[/-]\d{1,4}([, ]+\d{1,2}:\d{2})?/;
@@ -60,7 +62,12 @@ function isBadMetadata(s: string): boolean {
 }
 
 function cleanMetadata(s: string): string {
-  return s.replaceAll(NON_PRINTABLE, "").trim();
+  return s
+    .replaceAll(NON_PRINTABLE, "")
+    .replace(new RegExp(INVISIBLE_FORMAT, "gu"), "")
+    .replaceAll(WHITESPACE, " ")
+    .replace(METADATA_SUFFIX_NOISE, "")
+    .trim();
 }
 
 function looksLikeLegal(s: string): boolean {
@@ -112,7 +119,12 @@ export function extractAuthors(filename: string): string {
 }
 
 export function extractYear(filename: string): number {
-  const matches = filename.match(YEAR_RE);
+  const arxiv = ARXIV_ID.exec(filename);
+  if (arxiv) {
+    const year = 2000 + parseInt(arxiv[0].slice(0, 2));
+    if (year >= 2007 && year <= 2030) return year;
+  }
+  const matches = filename.replace(ARXIV_ID, "").match(YEAR_RE);
   if (matches) {
     const year = parseInt(matches[0]);
     if (year >= 1900 && year <= 2030) return year;

@@ -1,3 +1,8 @@
+@import '@fontsource/ibm-plex-sans/latin-400.css';
+@import '@fontsource/ibm-plex-sans/latin-500.css';
+@import '@fontsource/ibm-plex-sans/latin-600.css';
+@import '@fontsource/ibm-plex-serif/latin-400.css';
+@import '@fontsource/ibm-plex-serif/latin-500.css';
 @import "tailwindcss";
 
 /* Dark theme (default) */
@@ -55,10 +60,17 @@
 }
 
 :root {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  /* Prefer the IBM family when installed, while keeping the app fully
+     offline and native on machines that do not have it. */
+  font-family: 'IBM Plex Sans', 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
   color: var(--text-primary);
   background: var(--surface-0);
 }
+
+button, input, select, textarea { font: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
 
 body {
   margin: 0;

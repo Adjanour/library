@@ -305,6 +305,19 @@ app.post("/api/reading/sync-readest", () => {
   return Response.json({ error: "Readest integration not implemented" }, { status: 501 });
 });
 
+app.post("/api/quit", () => {
+  // The desktop shell does not reliably exit when its window closes, so
+  // offer an explicit quit: respond first, then terminate the process.
+  // The single-instance pidfile is removed so the next launch starts clean.
+  setTimeout(async () => {
+    try {
+      await Deno.remove(pidFile);
+    } catch { /* non-fatal */ }
+    Deno.exit(0);
+  }, 200);
+  return Response.json({ status: "quitting" });
+});
+
 app.post("/api/scan", async (c) => {
   let dirs = DEFAULT_SCAN_DIRS;
   let force = false;
@@ -367,6 +380,30 @@ app.get("/*", async (c) => {
     }
   }
 });
+
+// Single-instance guard: closing the desktop window does not always stop
+// the background server (upstream webview rough edge), so stale instances
+// pile up — each running the code from when it was launched, which makes
+// "relaunch to get the fix" silently open the old build. A new instance
+// therefore terminates any predecessor before serving.
+const home = Deno.env.get("HOME") ?? ".";
+const pidDir = join(home, ".cache", "library");
+const pidFile = join(pidDir, "library.pid");
+try {
+  await Deno.mkdir(pidDir, { recursive: true });
+  const prev = parseInt((await Deno.readTextFile(pidFile)).trim(), 10);
+  if (Number.isFinite(prev) && prev !== Deno.pid) {
+    try {
+      Deno.kill(prev, "SIGTERM");
+      await new Promise((r) => setTimeout(r, 1000));
+      try { Deno.kill(prev, "SIGKILL"); } catch { /* exited after TERM */ }
+      console.log(`Terminated previous instance (pid ${prev})`);
+    } catch { /* already gone */ }
+  }
+} catch { /* no pid file yet */ }
+try {
+  await Deno.writeTextFile(pidFile, String(Deno.pid));
+} catch { /* non-fatal */ }
 
 const port = parseInt(Deno.args[0] ?? "3000");
 const addr = Deno.env.get("DENO_SERVE_ADDRESS");
