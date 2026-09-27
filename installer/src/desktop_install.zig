@@ -160,7 +160,12 @@ fn writeLauncher(io: std.Io, allocator: std.mem.Allocator, root: std.Io.Dir, roo
                 "set /p VERSION=<\"%ROOT%\\desktop\\current.txt\"\r\n" ++
                 "set \"APP_ROOT=%ROOT%\\desktop\\versions\\%VERSION%\\Library\"\r\n" ++
                 "cd /d \"%APP_ROOT%\"\r\n" ++
-                "\"%APP_ROOT%\\Library.exe\" %*\r\n",
+                "for %%L in (\"%APP_ROOT%\\*.bat\") do (\r\n" ++
+                "  call \"%%~fL\" %*\r\n" ++
+                "  exit /b %%ERRORLEVEL%%\r\n" ++
+                ")\r\n" ++
+                "echo Library desktop bundle is missing its launcher. 1>&2\r\n" ++
+                "exit /b 1\r\n",
         ),
         .macos => try writer.interface.writeAll(
             "#!/bin/sh\n" ++
