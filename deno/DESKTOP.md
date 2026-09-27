@@ -134,3 +134,11 @@ deno task desktop         # Build desktop binary
 ```
 
 The binary will be at `dist/app/`.
+
+For the Library-specific build, packaging, and launch-validation commands, use [`docs/desktop-packaging.md`](../docs/desktop-packaging.md). The repository workflow is the source of truth for CI outputs.
+
+## CI packaging status
+
+`.github/workflows/desktop.yml` builds the CEF desktop package on native Linux, Windows, and macOS runners. Linux also launches the packaged executable under Xvfb and verifies `/api/health`; Windows and macOS currently provide build artifacts only.
+
+These artifacts are validation outputs, not release installers yet. Code signing, notarization, platform-specific installer metadata, and real-device reader verification remain required before advertising certified Windows or macOS support.

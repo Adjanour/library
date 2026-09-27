@@ -1,5 +1,7 @@
 # How to Build & Install a Deno Desktop App
 
+> This document explains the underlying Deno Desktop concepts. For the current Library commands and release status, start with [`../docs/getting-started.md`](../docs/getting-started.md), [`../docs/desktop-packaging.md`](../docs/desktop-packaging.md), and [`../docs/release-readiness.md`](../docs/release-readiness.md).
+
 A step-by-step guide from the Library project.
 
 ## Prerequisites

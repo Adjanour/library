@@ -1,6 +1,6 @@
 # Library
 
-A local-first desktop library for books, papers, and reading progress. It indexes folders you choose, extracts metadata, and provides fast in-app EPUB and PDF readers.
+Library is a local-first reading workspace for books and papers. It indexes folders you choose, extracts useful metadata, and provides fast in-app EPUB and PDF reading with durable progress, bookmarks, search, and queue management.
 
 Integrates with [FocusD](https://github.com/Adjanour/focusd) to pull reading plans and sync completion status.
 
@@ -15,20 +15,20 @@ Integrates with [FocusD](https://github.com/Adjanour/focusd) to pull reading pla
 - **Keyboard-driven** — full keyboard navigation in the web UI (press `?` for shortcuts)
 - **TUI mode** — terminal-based interface using [Bubble Tea](https://github.com/charmbracelet/bubbletea) for quick access without a browser
 
-## Quick Start
+## Quick start: web app
 
 ```bash
-# Build everything
+pnpm install --dir web/svelte --frozen-lockfile
+pnpm --dir web/svelte run build
 make build
-
-# Scan and index your library, then start the server
 ./bin/server --scan
-
-# Or just start (uses existing database)
-./bin/server
 ```
 
 The web UI runs at [http://localhost:8080](http://localhost:8080).
+
+### Scan directories
+
+In the Deno web and desktop UI, open Settings to add or remove the folders Library watches. The choices are stored in the local database and restored on restart. The legacy Go server path still uses `Documents`, `Downloads`, and `Books` under the current user's home directory when started with `--scan`; use the Deno UI when you need configurable scan roots.
 
 ### Dev mode
 
@@ -37,6 +37,16 @@ The web UI runs at [http://localhost:8080](http://localhost:8080).
 ```
 
 Starts the SvelteKit dev server on port 5173 with hot reload.
+
+## Platform status
+
+| Platform | Status |
+| --- | --- |
+| Linux | Build, CEF packaging, and launch validation verified locally and in CI |
+| Windows | Native CI build configured; signing, installer metadata, and real-device EPUB verification pending |
+| macOS | Native CI build configured; signing, notarization, installer metadata, and real-device EPUB verification pending |
+
+Windows and macOS are build-capable, not release-certified. See [release readiness](docs/release-readiness.md).
 
 ## Building
 
@@ -54,17 +64,22 @@ make build-web      # SvelteKit frontend only
 The current desktop flow uses Deno Desktop and the Svelte production build:
 
 ```bash
-cd web/svelte
-pnpm install --frozen-lockfile
-pnpm run build
-
-cd ../../deno
-deno task check
-deno task test
-deno task desktop
+pnpm install --dir web/svelte --frozen-lockfile
+pnpm --dir web/svelte run build
+deno task --cwd deno check
+deno task --cwd deno test
+deno task --cwd deno desktop
 ```
 
-Linux is the currently verified release target. The runtime now uses platform-correct data paths and file launchers on macOS and Windows, and Deno Desktop can produce those targets, but signed/notarized installers still need CI builds and real-device verification before those platforms are advertised as supported.
+The desktop build uses CEF so EPUB rendering is consistent across platforms. Linux is the currently verified release target; Windows and macOS builds are CI-capable but not release-certified.
+
+## Project guides
+
+- [Getting started](docs/getting-started.md) — setup, build, run, and test Library.
+- [Desktop packaging](docs/desktop-packaging.md) — build and validate CEF desktop artifacts.
+- [Installer guide](docs/installer.md) — manifests, signatures, caching, versioned installs, and rollback.
+- [Release readiness](docs/release-readiness.md) — certification gates for v0.1.1 and later.
+- [Deno Desktop reference](deno/DESKTOP.md) — runtime architecture and configuration.
 
 Metadata extraction currently uses Poppler tools (`pdfinfo`, `pdftotext`) and `unzip` when available. Missing tools degrade to filename metadata rather than preventing the library or in-app readers from working.
 

@@ -6,3 +6,5 @@ web/static/
 web/svelte/.svelte-kit/
 web/svelte/build/
 library
+installer/.zig-cache/
+installer/zig-out/
