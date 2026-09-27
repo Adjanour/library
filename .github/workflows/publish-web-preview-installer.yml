@@ -166,6 +166,9 @@ jobs:
           if ($denoLaunchers.Count -eq 0) {
             throw "The Windows desktop app directory contains no runnable launcher"
           }
+          if (-not (Test-Path "$bundle\library-windows.exe" -PathType Leaf)) {
+            throw "The Windows desktop app directory is missing library-windows.exe"
+          }
 
           $stage = "$env:RUNNER_TEMP\Library"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
