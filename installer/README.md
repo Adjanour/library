@@ -35,3 +35,21 @@ The HTTPS downloader is compile-verified on Linux, Windows, and macOS targets. T
 GitHub Actions runs this Linux integration suite on installer changes and separately verifies the Windows and macOS cross-builds. The workflow is intentionally validation-only; it does not publish artifacts or releases.
 
 The Linux host build is verified locally. The executable also cross-compiles for `x86_64-windows-gnu` and `aarch64-macos`; those targets are build-capable, not release-certified. The public `v0.1.1-preview.1` installer is explicitly experimental and Linux-only. It does not install Readest or Sioyek, create desktop entries, elevate permissions, or provide Windows/macOS package installation.
+
+## No sudo required
+
+The preview installer is designed for a normal user account. It does not call
+`sudo`, `pkexec`, `doas`, a package manager, or a system service manager, and
+it does not write to `/opt`, `/usr/local`, or another system directory.
+
+Use a directory owned by the user, such as:
+
+```bash
+library-setup-linux-x86_64 install-url \
+  https://github.com/Adjanour/library/releases/download/v0.1.1-preview.1/library-preview-manifest.signed \
+  --root "${XDG_DATA_HOME:-$HOME/.local/share}/library-preview"
+```
+
+The `--root` flag is explicit so the installer never guesses where it may
+write. Passing a system-owned directory would defeat the user-owned install
+model and is intentionally not part of the supported preview flow.

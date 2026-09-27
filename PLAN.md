@@ -25,7 +25,7 @@ The next public artifact is `v0.1.1-preview.1`:
 - macOS: native CI build-capable; not certified.
 - Installer: development and validation foundation; not yet a polished public installer.
 
-The Linux preview installer is now available as an explicitly experimental binary. It installs the preview archive from a signed remote manifest, creates a launcher, and supports rollback.
+The Linux preview installer is now available as an explicitly experimental binary. It installs the preview archive from a signed remote manifest, creates a launcher, and supports rollback. Its supported flow is user-owned and never requires `sudo`.
 
 The preview must not imply Windows/macOS signing, notarization, installer metadata, or real-device EPUB verification.
 
@@ -64,6 +64,7 @@ The preview must not imply Windows/macOS signing, notarization, installer metada
 - Claiming Windows or macOS release certification.
 - Silent installation of Readest or Sioyek.
 - Automatic elevation or OS-level integration without user consent.
+- Requiring administrator access for the normal install, update, launch, or rollback flow.
 - Publishing unsigned or unverified platform installers.
 - Replacing the native macOS validation gate with QEMU on Linux.
 

@@ -49,6 +49,7 @@ xvfb-run -a installer/scripts/validate-desktop-epub.sh \
 - Keep cache limits, cancellation, and cleanup explicit for large books.
 - Preserve keyboard access and visible focus states.
 - Avoid adding motion, dashboard clutter, or browser-native-looking controls without a clear product reason.
+- Keep installers user-owned. Do not add `sudo`, elevation prompts, package-manager calls, or writes to system directories as part of normal installation.
 - Update `CHANGELOG.md`, `PLAN.md`, or a focused guide when behavior or release status changes.
 
 ## Pull requests

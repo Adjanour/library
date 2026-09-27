@@ -41,6 +41,22 @@ library-setup-linux-x86_64 install-url \
 
 The Linux tarball is extracted into the selected version directory and the launcher is written to `library/bin/library`.
 
+### User-owned installation
+
+The installer must not require administrator access. It performs no elevation,
+package-manager, or system-service operations and writes only below the
+directory supplied with `--root`. The supported preview command uses a
+user-owned data directory:
+
+```bash
+--root "${XDG_DATA_HOME:-$HOME/.local/share}/library-preview"
+```
+
+Do not use `/opt`, `/usr/local`, or another system-owned directory for the
+preview. Keeping the installation under the user's data directory makes the
+launcher, version pointers, rollback state, and downloaded artifacts writable
+without `sudo`.
+
 ## Rollback
 
 ```bash
@@ -51,4 +67,4 @@ Rollback swaps `current.txt` and `previous.txt` after confirming the target vers
 
 ## Current limitations
 
-The public preview installer is experimental and Linux-only. Platform-specific shortcuts, file associations, elevation, release signing policy, and Readest/Sioyek payload installation are not complete. Windows and macOS binaries are build-capable but do not have public installer packages yet.
+The public preview installer is experimental and Linux-only. Platform-specific shortcuts, file associations, release signing policy, and Readest/Sioyek payload installation are not complete. Windows and macOS binaries are build-capable but do not have public installer packages yet. A future polished installer must preserve the same no-sudo, user-owned installation model on every platform.
