@@ -146,11 +146,11 @@ jobs:
       - name: Build Windows desktop bundle
         working-directory: deno
         shell: bash
-        run: deno desktop --allow-all --include ../web/static --target x86_64-pc-windows-msvc --output ../dist/library-windows.exe src/main.ts
+        run: deno desktop --allow-all --include ../web/static --target x86_64-pc-windows-msvc --output ../dist/library-windows src/main.ts
       - name: Package Windows desktop bundle
         shell: pwsh
         run: |
-          $bundle = "$env:GITHUB_WORKSPACE\dist\library-windows.exe"
+          $bundle = "$env:GITHUB_WORKSPACE\dist\library-windows"
           if (-not (Test-Path $bundle -PathType Container)) {
             throw "Deno desktop did not produce the expected Windows app directory: $bundle"
           }

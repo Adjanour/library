@@ -78,7 +78,7 @@ jobs:
         run: pnpm install --frozen-lockfile; pnpm run build
       - name: Build Windows desktop binary
         working-directory: deno
-        run: deno desktop --allow-all --include ../web/static --target x86_64-pc-windows-msvc --output ../dist/library-windows.exe src/main.ts
+        run: deno desktop --allow-all --include ../web/static --target x86_64-pc-windows-msvc --output ../dist/library-windows src/main.ts
       - uses: actions/upload-artifact@v4
         with:
           name: library-windows-build
