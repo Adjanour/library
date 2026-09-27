@@ -40,6 +40,7 @@ jobs:
         run: |
           mkdir -p dist/library-web-preview/deno dist/library-web-preview/web
           cp deno/deno.json dist/library-web-preview/deno/deno.json
+          cp deno/deno.lock dist/library-web-preview/deno/deno.lock
           cp -R deno/src dist/library-web-preview/deno/src
           cp -R web/static dist/library-web-preview/web/static
           cp scripts/start-web-preview.sh dist/library-web-preview/start-web-preview.sh
@@ -51,7 +52,7 @@ jobs:
       - name: Archive preview bundle
         run: |
           tar -C dist -czf dist/library-web-preview.tar.gz library-web-preview
-          (cd dist && zip -qr library-web-preview.zip library-web-preview)
+          (cd dist/library-web-preview && zip -qr ../library-web-preview.zip .)
           sha256sum dist/library-web-preview.tar.gz > dist/library-web-preview.tar.gz.sha256
           sha256sum dist/library-web-preview.zip > dist/library-web-preview.zip.sha256
 

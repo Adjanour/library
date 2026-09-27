@@ -2,13 +2,18 @@
 
 `library-setup` is the thin, native bootstrapper for Library and its optional Readest and Sioyek integrations.
 
-The preview installer has a Linux-only end-to-end path. It fetches a signed release manifest over HTTPS, detects the compiled target, selects the exact artifact, verifies SHA-256 and Ed25519 data, extracts the Linux tarball, creates a launcher, and activates releases through an atomic version pointer. Windows and macOS package installers remain separate work.
+The installer has two preview paths. The existing Linux desktop path installs
+the large CEF application archive. The cross-platform Web Preview path installs
+a private Deno runtime and the small browser bundle on Linux, Windows, and
+macOS without requiring a package manager or administrator access.
 
 ```bash
 mise exec -- zig version
 mise exec -- zig build
 mise exec -- zig build test --summary all
 mise exec -- zig build run -- help
+mise exec -- zig build run
+mise exec -- zig build run -- web-preview --no-launch
 mise exec -- zig build run -- verify-file <path> <sha256>
 mise exec -- zig build run -- sign-manifest <payload> <output> <seed-hex>
 mise exec -- zig build run -- install <signed-manifest> --root <absolute-directory>
@@ -19,6 +24,13 @@ mise exec -- zig build run -- rollback <absolute-directory>
 The development manifest contains unresolved versions and placeholder digests. The planner can parse it, but intentionally refuses to treat it as installable.
 
 The install path supports signed local `file://` artifacts and HTTPS acquisition. HTTPS artifacts stream into a SHA-256-addressed cache with retry handling, temporary `.part` files, declared-size checks, and verification before cache promotion. Linux `tar_gz` artifacts are extracted into `library/versions/<version>`, a `library/bin/library` launcher follows `current.txt`, and the previous version is retained in `previous.txt` and can be restored with `rollback`.
+
+The public `web-preview` command pins the release public key rather than
+trusting a key supplied by the manifest. It extracts ZIP files with Zig's
+standard library, keeps Deno under the chosen user-owned root, caches locked
+dependencies into that root, writes version pointers, and creates a launcher
+that opens the local browser interface. Running the setup binary without a
+command selects this path.
 
 `sign-manifest` is a development fixture tool. Release CI must sign generated manifests using a protected signing secret, not a command-line seed.
 
@@ -32,9 +44,17 @@ mise exec -- zig build run -- install /tmp/library-manifest.signed --root /tmp/l
 
 The HTTPS downloader is compile-verified on Linux, Windows, and macOS targets. The CI download harness exercises redirects, retries, size rejection, checksum rejection, and cache promotion against a local HTTP server. HTTPS certificate-chain testing remains separate because Zig 0.16's standard client does not currently make a local test CA straightforward to inject; production downloads remain HTTPS-only by default, while `--allow-http` is an explicit test-only escape hatch.
 
-GitHub Actions runs this Linux integration suite on installer changes and separately verifies the Windows and macOS cross-builds. The workflow is intentionally validation-only; it does not publish artifacts or releases.
+GitHub Actions runs the download and Web Preview integration suites on Linux
+and separately verifies Windows and macOS cross-builds. The protected publish
+workflow builds small release binaries, signs the Web Preview manifest from a
+repository secret, checks the pinned public key, and attaches the results to
+the preview release.
 
-The Linux host build is verified locally. The executable also cross-compiles for `x86_64-windows-gnu` and `aarch64-macos`; those targets are build-capable, not release-certified. The public `v0.1.1-preview.1` installer is explicitly experimental and Linux-only. It does not install Readest or Sioyek, create desktop entries, elevate permissions, or provide Windows/macOS package installation.
+The Linux host build is verified locally. The executable cross-compiles for
+Windows x86_64, Intel macOS, and Apple Silicon macOS. Those targets are
+available for Web Preview testing but remain unsigned, unnotarized, and not
+release-certified. The installer does not yet install Readest or Sioyek or
+create platform desktop entries.
 
 ## No sudo required
 

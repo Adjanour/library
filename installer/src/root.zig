@@ -4,6 +4,7 @@ pub const platform = @import("platform.zig");
 pub const verify = @import("verify.zig");
 pub const signed_manifest = @import("signed_manifest.zig");
 pub const install = @import("install.zig");
+pub const web_install = @import("web_install.zig");
 pub const download = @import("download.zig");
 
 const std = @import("std");
@@ -82,5 +83,20 @@ test "Ed25519 manifest signatures are verified" {
     try std.testing.expectError(
         error.SignatureVerificationFailed,
         verify.verifyManifestSignature("tampered", &signature_hex, &public_key_hex),
+    );
+}
+
+test "trusted manifest signatures reject a substituted key" {
+    const Ed25519 = std.crypto.sign.Ed25519;
+    const trusted = Ed25519.KeyPair.generate(std.testing.io);
+    const substituted = Ed25519.KeyPair.generate(std.testing.io);
+    const signature = try substituted.sign(fixture, null);
+    const signature_hex = std.fmt.bytesToHex(signature.toBytes(), .lower);
+    const substituted_key_hex = std.fmt.bytesToHex(substituted.public_key.toBytes(), .lower);
+    const trusted_key_hex = std.fmt.bytesToHex(trusted.public_key.toBytes(), .lower);
+
+    try std.testing.expectError(
+        error.UntrustedManifestKey,
+        verify.verifyManifestSignatureTrusted(fixture, &signature_hex, &substituted_key_hex, &trusted_key_hex),
     );
 }

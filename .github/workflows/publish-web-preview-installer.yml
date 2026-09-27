@@ -1,0 +1,104 @@
+name: Publish web preview installers
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }} installer
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            target: x86_64-linux-gnu
+            source: library-setup
+            output: library-setup-linux-x86_64
+          - name: Windows x86_64
+            target: x86_64-windows-gnu
+            source: library-setup.exe
+            output: library-setup-windows-x86_64.exe
+          - name: macOS x86_64
+            target: x86_64-macos
+            source: library-setup
+            output: library-setup-macos-x86_64
+          - name: macOS Apple Silicon
+            target: aarch64-macos
+            source: library-setup
+            output: library-setup-macos-aarch64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+
+      - name: Build small installer
+        working-directory: installer
+        run: mise exec -- zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall --summary all
+
+      - name: Stage installer
+        run: |
+          mkdir -p publish
+          cp "installer/zig-out/bin/${{ matrix.source }}" "publish/${{ matrix.output }}"
+          chmod +x "publish/${{ matrix.output }}"
+          (cd publish && sha256sum "${{ matrix.output }}" > "${{ matrix.output }}.sha256")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.target }}
+          path: publish/*
+
+  manifest:
+    name: Sign web preview manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+
+      - name: Sign manifest with protected release key
+        working-directory: installer
+        env:
+          LIBRARY_INSTALLER_SIGNING_SEED: ${{ secrets.LIBRARY_INSTALLER_SIGNING_SEED }}
+        run: |
+          test -n "$LIBRARY_INSTALLER_SIGNING_SEED"
+          mkdir -p ../publish
+          mise exec -- zig build run -- sign-manifest manifests/web-preview-0.1.1.json ../publish/library-web-preview-manifest.signed
+          grep -q '^public_key=21dbc24320a3d009b8ab0a6854859d64c4a936b4033703cfe2edc105c95a682b$' ../publish/library-web-preview-manifest.signed
+          (cd ../publish && sha256sum library-web-preview-manifest.signed > library-web-preview-manifest.signed.sha256)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-preview-manifest
+          path: publish/*
+
+  publish:
+    name: Attach installers to preview release
+    needs: [build, manifest]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: publish
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-preview-manifest
+          path: publish
+
+      - name: Upload verified installer assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v0.1.1-preview.1
+        run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release upload "$RELEASE_TAG" publish/* --clobber --repo "$GITHUB_REPOSITORY"

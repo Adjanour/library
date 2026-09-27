@@ -64,3 +64,13 @@ pub fn verifyManifestSignature(
     const public_key = try Ed25519.PublicKey.fromBytes(public_key_bytes);
     try signature.verify(bytes, public_key);
 }
+
+pub fn verifyManifestSignatureTrusted(
+    bytes: []const u8,
+    signature_hex: []const u8,
+    public_key_hex: []const u8,
+    trusted_public_key_hex: []const u8,
+) !void {
+    if (!std.mem.eql(u8, public_key_hex, trusted_public_key_hex)) return error.UntrustedManifestKey;
+    try verifyManifestSignature(bytes, signature_hex, public_key_hex);
+}

@@ -23,6 +23,9 @@ verification, signing, and installer certification.
 The current public artifact is
 [`v0.1.1-preview.1`](https://github.com/Adjanour/library/releases/tag/v0.1.1-preview.1).
 The Linux installer is experimental, user-owned, and does not require `sudo`.
+Small Web Preview setup binaries are available for Linux, Windows, and macOS;
+they install a verified private Deno runtime and require no administrator
+access. Windows and macOS builds are still unsigned preview software.
 See [release readiness](docs/release-readiness.md) for the certification gates.
 
 ## Features

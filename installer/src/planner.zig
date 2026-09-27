@@ -8,6 +8,7 @@ pub const Selection = struct {
     pub fn includes(self: Selection, id: manifest.PackageId) bool {
         return switch (id) {
             .library => true,
+            .web_preview, .deno => false,
             .readest => self.readest,
             .sioyek => self.sioyek,
         };
@@ -46,9 +47,20 @@ pub fn create(
     return plan;
 }
 
-fn findArtifact(package: *const manifest.Package, target: platform.Target) ?*const manifest.Artifact {
+pub fn findArtifact(package: *const manifest.Package, target: platform.Target) ?*const manifest.Artifact {
     for (package.artifacts) |*artifact| {
         if (artifact.os == target.os and artifact.arch == target.arch) return artifact;
     }
     return null;
+}
+
+pub fn findPackageArtifact(release: *const manifest.Manifest, id: manifest.PackageId, target: platform.Target) !Item {
+    for (release.packages) |*package| {
+        if (package.id != id) continue;
+        return .{
+            .package = package,
+            .artifact = findArtifact(package, target) orelse return error.ArtifactUnavailable,
+        };
+    }
+    return error.PackageMissing;
 }

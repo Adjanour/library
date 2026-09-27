@@ -5,69 +5,86 @@ production Svelte interface from the Deno API, so books remain on the tester's
 machine and the application can scan local folders, read files, and persist
 state in SQLite.
 
-## Requirements
+## Install the preview
 
-- Deno 2.9.6 or newer
-- A browser with JavaScript enabled
+Download the small setup program for your machine from the
+[Library preview release](https://github.com/Adjanour/library/releases/tag/v0.1.1-preview.1):
 
-No account, hosted database, or administrator access is required.
+- `library-setup-windows-x86_64.exe` for 64-bit Windows
+- `library-setup-macos-aarch64` for Apple Silicon Macs
+- `library-setup-macos-x86_64` for Intel Macs
+- `library-setup-linux-x86_64` for 64-bit Linux
 
-## Run the release bundle
+Run the downloaded setup program without arguments. It chooses a user-owned
+install folder, downloads the signed Web Preview manifest, installs a private
+Deno 2.9.6 runtime, verifies every download, caches the locked dependencies,
+creates a launcher, and opens Library at <http://localhost:8080>.
 
-Download the archive for your platform from the [Library preview release](https://github.com/Adjanour/library/releases/tag/v0.1.1-preview.1).
+No account, separate Deno installation, administrator access, or `sudo` is
+required. The installer is small; the verified Deno and Library payloads add
+about 45 MB during setup.
 
-### Linux and macOS
+### Windows
 
-Download `library-web-preview.tar.gz`, then:
-
-```bash
-tar -xzf library-web-preview.tar.gz
-cd library-web-preview
-./start-web-preview.sh
-```
-
-Open <http://localhost:8080>. To use another port:
-
-```bash
-./start-web-preview.sh 9090
-```
-
-The first run may download Deno module dependencies. The launcher does not
-install system packages or require `sudo`.
-
-### Windows PowerShell
-
-Download `library-web-preview.zip` and extract it in File Explorer or with
-PowerShell:
+Double-click `library-setup-windows-x86_64.exe`, or run it from PowerShell:
 
 ```powershell
-Expand-Archive .\library-web-preview.zip -DestinationPath .
-Set-Location .\library-web-preview
-.\start-web-preview.ps1
+.\library-setup-windows-x86_64.exe
 ```
 
-If PowerShell blocks local scripts, run this once for the current PowerShell
-window, then start the preview again:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-```
-
-Use another port with `.\start-web-preview.ps1 9090`.
-
-### Windows Command Prompt
-
-Extract `library-web-preview.zip`, open Command Prompt in the extracted
-folder, and run:
+The files are installed under `%LOCALAPPDATA%\Library Preview`. The reusable
+launcher is:
 
 ```bat
-start-web-preview.cmd
+%LOCALAPPDATA%\Library Preview\web-preview\bin\library-web-preview.cmd
 ```
 
-Use another port with `start-web-preview.cmd 9090`.
+This preview binary is not code-signed yet, so Windows SmartScreen may display
+a warning. Do not treat the build as release-certified until Windows signing
+and native-device verification are complete.
 
-The Windows launchers use Deno already installed for the current user. They do
-not install system packages or require administrator access.
+### macOS
+
+Choose the binary matching the Mac processor, then run:
+
+```bash
+chmod +x library-setup-macos-aarch64
+./library-setup-macos-aarch64
+```
+
+Use `library-setup-macos-x86_64` instead on an Intel Mac. Library is installed
+under `~/Library/Application Support/Library Preview`.
+
+The preview installer is not notarized yet. macOS may quarantine it, so these
+builds remain for developer testing rather than general distribution.
+
+### Linux
+
+```bash
+chmod +x library-setup-linux-x86_64
+./library-setup-linux-x86_64
+```
+
+Library is installed under `$XDG_DATA_HOME/library-preview` or
+`~/.local/share/library-preview`.
+
+### Custom install folder or installation only
+
+Use `--root` with an absolute path to override the platform default. Add
+`--no-launch` when setup should install the files without starting Library:
+
+```bash
+./library-setup-linux-x86_64 web-preview --root /absolute/path --no-launch
+```
+
+## Manual bundle fallback
+
+The release still includes `library-web-v0.1.1-preview.1.zip` and
+`library-web-v0.1.1-preview.1.tar.gz` for contributors who want to inspect or
+run the files manually. The manual archives require Deno 2.9.6 or newer on
+`PATH`; the setup programs do not.
+
+The installed launcher accepts `LIBRARY_PORT` when port 8080 is unavailable.
 
 ## Choose library folders
 

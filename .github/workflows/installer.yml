@@ -48,6 +48,10 @@ jobs:
         working-directory: installer
         run: bash tests/https_integration.sh
 
+      - name: Web preview integration
+        working-directory: installer
+        run: bash tests/web_preview_integration.sh
+
   cross-build:
     name: Build ${{ matrix.target }}
     runs-on: ubuntu-latest
@@ -56,6 +60,7 @@ jobs:
       matrix:
         target:
           - x86_64-windows-gnu
+          - x86_64-macos
           - aarch64-macos
     steps:
       - name: Checkout

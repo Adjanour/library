@@ -1,12 +1,31 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const installer = @import("installer");
 
-pub fn main(init: std.process.Init) !void {
+const web_preview_manifest_url = "https://github.com/Adjanour/library/releases/download/v0.1.1-preview.1/library-web-preview-manifest.signed";
+const release_public_key_hex = "21dbc24320a3d009b8ab0a6854859d64c4a936b4033703cfe2edc105c95a682b";
+
+pub fn main(init: std.process.Init) void {
+    run(init) catch |err| {
+        var buffer: [512]u8 = undefined;
+        var writer = std.Io.File.stderr().writer(init.io, &buffer);
+        writer.interface.print("\nLibrary Setup failed: {s}\n", .{@errorName(err)}) catch {};
+        writer.interface.writeAll("No unverified files were activated. Please include this error when reporting the failure.\n") catch {};
+        writer.interface.flush() catch {};
+        if (builtin.os.tag == .windows) {
+            var child = std.process.spawn(init.io, .{ .argv = &.{ "cmd.exe", "/c", "pause" } }) catch std.process.exit(1);
+            _ = child.wait(init.io) catch {};
+        }
+        std.process.exit(1);
+    };
+}
+
+fn run(init: std.process.Init) !void {
     var args = try std.process.Args.Iterator.initAllocator(init.minimal.args, init.gpa);
     defer args.deinit();
     _ = args.next();
 
-    const command = args.next() orelse "help";
+    const command = args.next() orelse "web-preview";
     if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "--help")) {
         try printHelp(init.io);
         return;
@@ -34,6 +53,16 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
+    if (std.mem.eql(u8, command, "install-web")) {
+        try installWeb(init, &args);
+        return;
+    }
+
+    if (std.mem.eql(u8, command, "web-preview")) {
+        try installWebPreview(init, &args);
+        return;
+    }
+
     if (std.mem.eql(u8, command, "rollback")) {
         const root = args.next() orelse return error.MissingInstallRoot;
         try installer.install.rollback(init.io, init.gpa, root);
@@ -41,7 +70,7 @@ pub fn main(init: std.process.Init) !void {
     }
 
     if (std.mem.eql(u8, command, "sign-manifest")) {
-        try signManifest(init.io, init.gpa, &args);
+        try signManifest(init.io, init.gpa, init.environ_map.*, &args);
         return;
     }
 
@@ -52,16 +81,134 @@ fn printHelp(io: std.Io) !void {
     var buffer: [2048]u8 = undefined;
     var writer = std.Io.File.stdout().writer(io, &buffer);
     try writer.interface.writeAll(
-        "Library Setup (development planner)\n\n" ++
+        "Library Setup\n\n" ++
             "Usage:\n" ++
+            "  library-setup web-preview [--root <absolute-directory>] [--manifest-url <https-url>] [--no-launch]\n" ++
             "  library-setup plan [--with-readest] [--with-sioyek]\n" ++
             "  library-setup verify-file <path> <sha256>\n" ++
             "  library-setup install <signed-manifest> --root <absolute-directory> [--ca-cert <absolute-pem>] [--allow-http]\n" ++
             "  library-setup install-url <https-signed-manifest> --root <absolute-directory>\n" ++
+            "  library-setup install-web <signed-manifest> --root <absolute-directory> [--allow-http]\n" ++
             "  library-setup rollback <absolute-directory>\n" ++
-            "  library-setup sign-manifest <payload> <output> <seed-hex>\n",
+            "  library-setup sign-manifest <payload> <output> [seed-hex]\n",
     );
     try writer.interface.flush();
+}
+
+fn installWeb(init: std.process.Init, args: *std.process.Args.Iterator) !void {
+    const manifest_path = args.next() orelse return error.MissingManifest;
+    var root: ?[]const u8 = null;
+    var allow_http = false;
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--root")) {
+            root = args.next() orelse return error.MissingInstallRoot;
+        } else if (std.mem.eql(u8, arg, "--allow-http")) {
+            allow_http = true;
+        } else return error.UnknownInstallOption;
+    }
+    const install_root = root orelse return error.MissingInstallRoot;
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(init.io, manifest_path, init.gpa, .limited(8 * 1024 * 1024));
+    defer init.gpa.free(bytes);
+    const signed = try installer.signed_manifest.parse(bytes);
+    try installer.verify.verifyManifestSignature(signed.payload, signed.signature_hex, signed.public_key_hex);
+    var parsed = try installer.manifest.parse(init.gpa, signed.payload);
+    defer parsed.deinit();
+    const result = try installer.web_install.install(init.io, init.gpa, &parsed.value, try installer.platform.current(), .{
+        .root = install_root,
+        .allow_insecure_http = allow_http,
+        .environ_map = init.environ_map,
+    });
+    result.deinit(init.gpa);
+}
+
+fn installWebPreview(init: std.process.Init, args: *std.process.Args.Iterator) !void {
+    const target = try installer.platform.current();
+    var root: ?[]const u8 = null;
+    var manifest_url: []const u8 = web_preview_manifest_url;
+    var launch = true;
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--root")) {
+            root = args.next() orelse return error.MissingInstallRoot;
+        } else if (std.mem.eql(u8, arg, "--manifest-url")) {
+            manifest_url = args.next() orelse return error.MissingManifestUrl;
+        } else if (std.mem.eql(u8, arg, "--no-launch")) {
+            launch = false;
+        } else return error.UnknownInstallOption;
+    }
+
+    const owned_root = if (root == null)
+        try defaultInstallRoot(init.gpa, target, init.environ_map.*)
+    else
+        null;
+    defer if (owned_root) |value| init.gpa.free(value);
+    const install_root = root orelse owned_root.?;
+    const cache_dir = try std.fs.path.join(init.gpa, &.{ install_root, "cache" });
+    defer init.gpa.free(cache_dir);
+
+    var output_buffer: [1024]u8 = undefined;
+    var output = std.Io.File.stdout().writer(init.io, &output_buffer);
+    try output.interface.print("Installing Library Web Preview to {s}\n", .{install_root});
+    try output.interface.flush();
+
+    const bytes = try installer.download.fetchManifest(init.io, init.gpa, manifest_url, cache_dir);
+    defer init.gpa.free(bytes);
+    const signed = try installer.signed_manifest.parse(bytes);
+    try installer.verify.verifyManifestSignatureTrusted(
+        signed.payload,
+        signed.signature_hex,
+        signed.public_key_hex,
+        release_public_key_hex,
+    );
+    var parsed = try installer.manifest.parse(init.gpa, signed.payload);
+    defer parsed.deinit();
+    const result = try installer.web_install.install(init.io, init.gpa, &parsed.value, target, .{
+        .root = install_root,
+        .environ_map = init.environ_map,
+    });
+    defer result.deinit(init.gpa);
+
+    try output.interface.print(
+        "\nLibrary Web Preview is ready.\nLauncher:\n  {s}\n\n",
+        .{result.launcher_path},
+    );
+    try output.interface.flush();
+    if (launch) {
+        try output.interface.writeAll("Starting Library at http://localhost:8080. Close this window to stop it.\n");
+        try output.interface.flush();
+        var child = try std.process.spawn(init.io, .{ .argv = &.{result.launcher_path} });
+        _ = try child.wait(init.io);
+    } else {
+        try output.interface.writeAll("Run the launcher when you are ready.\n");
+        try output.interface.flush();
+    }
+}
+
+fn defaultInstallRoot(
+    allocator: std.mem.Allocator,
+    target: installer.platform.Target,
+    environ: std.process.Environ.Map,
+) ![]u8 {
+    return switch (target.os) {
+        .windows => std.fs.path.join(allocator, &.{
+            environ.get("LOCALAPPDATA") orelse return error.LocalAppDataUnavailable,
+            "Library Preview",
+        }),
+        .macos => std.fs.path.join(allocator, &.{
+            environ.get("HOME") orelse return error.HomeDirectoryUnavailable,
+            "Library",
+            "Application Support",
+            "Library Preview",
+        }),
+        .linux => if (environ.get("XDG_DATA_HOME")) |data_home|
+            std.fs.path.join(allocator, &.{ data_home, "library-preview" })
+        else
+            std.fs.path.join(allocator, &.{
+                environ.get("HOME") orelse return error.HomeDirectoryUnavailable,
+                ".local",
+                "share",
+                "library-preview",
+            }),
+    };
 }
 
 fn installUrl(io: std.Io, allocator: std.mem.Allocator, args: *std.process.Args.Iterator) !void {
@@ -80,10 +227,15 @@ fn installUrl(io: std.Io, allocator: std.mem.Allocator, args: *std.process.Args.
     try installManifestBytes(io, allocator, bytes, install_root, null, false);
 }
 
-fn signManifest(io: std.Io, allocator: std.mem.Allocator, args: *std.process.Args.Iterator) !void {
+fn signManifest(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ: std.process.Environ.Map,
+    args: *std.process.Args.Iterator,
+) !void {
     const payload_path = args.next() orelse return error.MissingManifest;
     const output_path = args.next() orelse return error.MissingOutput;
-    const seed_hex = args.next() orelse return error.MissingSigningSeed;
+    const seed_hex = args.next() orelse environ.get("LIBRARY_INSTALLER_SIGNING_SEED") orelse return error.MissingSigningSeed;
     var seed: [std.crypto.sign.Ed25519.KeyPair.seed_length]u8 = undefined;
     _ = try std.fmt.hexToBytes(&seed, seed_hex);
     const key_pair = try std.crypto.sign.Ed25519.KeyPair.generateDeterministic(seed);

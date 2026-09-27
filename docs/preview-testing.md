@@ -9,21 +9,32 @@ The public preview page is:
 
 <https://github.com/Adjanour/library/releases/tag/v0.1.1-preview.1>
 
-The published Linux installer is experimental. It installs into a directory
-owned by the current user and does not require `sudo`:
+For the local Web Preview, download the small setup program matching the test
+machine:
+
+- `library-setup-windows-x86_64.exe`
+- `library-setup-macos-aarch64` for Apple Silicon
+- `library-setup-macos-x86_64` for Intel Macs
+- `library-setup-linux-x86_64`
+
+Run the setup program without arguments. It downloads and verifies Library and
+its private Deno runtime, installs below the current user's application-data
+directory, opens the browser, and requires no administrator access. Linux can
+be started from a terminal with:
 
 ```bash
 curl -L -o library-setup-linux-x86_64 \
   https://github.com/Adjanour/library/releases/download/v0.1.1-preview.1/library-setup-linux-x86_64
 chmod +x library-setup-linux-x86_64
-./library-setup-linux-x86_64 install-url \
-  https://github.com/Adjanour/library/releases/download/v0.1.1-preview.1/library-preview-manifest.signed \
-  --root "${XDG_DATA_HOME:-$HOME/.local/share}/library-preview"
-"${XDG_DATA_HOME:-$HOME/.local/share}/library-preview/library/bin/library"
+./library-setup-linux-x86_64
 ```
 
-Windows and macOS builds currently run in CI but are not published as signed
-installers. The latest successful platform build is available from the
+Windows and macOS setup binaries are not signed or notarized yet. Treat them
+as developer previews and report any SmartScreen, Gatekeeper, antivirus, or
+launch failure explicitly.
+
+The larger CEF desktop builds are separate. The latest successful desktop
+build is available from the
 [Desktop builds workflow run](https://github.com/Adjanour/library/actions/runs/36307933901).
 Open the run, scroll to **Artifacts**, and download the matching archive:
 
