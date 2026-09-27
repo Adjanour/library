@@ -1,7 +1,7 @@
-import { extname, basename } from "@std/path";
+import { basename, extname, join } from "@std/path";
 import type { BookType, Item } from "./types.ts";
 import type { Result } from "./result.ts";
-import { Ok, Err, AppError } from "./result.ts";
+import { AppError, Err, Ok } from "./result.ts";
 import type { DB } from "./db.ts";
 
 const SUPPORTED_EXTENSIONS: Record<string, BookType> = {
@@ -11,8 +11,8 @@ const SUPPORTED_EXTENSIONS: Record<string, BookType> = {
   ".djvu": "book",
 };
 
-const ARXIV_ID = /\d{4}\.\d{4,}(v\d+)?/;
-const YEAR_RE = /\b(19|20)\d{2}\b/;
+const ARXIV_ID = /(?<!\d)\d{4}\.\d{4,}(v\d+)?/;
+const YEAR_RE = /\b(?:19|20)\d{2}\b(?![.,]\d)/;
 const AUTHOR_PARENS = /\(([^)]+)\)/g;
 const ZLIBRARY_SK = /\s*\(z-library\.sk.*?\)\s*/g;
 const ZLIB_ORG = /\s*\(z-lib\.org.*?\)\s*/g;
@@ -23,15 +23,25 @@ const PARENS = /\([^)]*\)/g;
 const CLEAN_TITLE = /[_\-,.]+/g;
 const WHITESPACE = /\s+/g;
 const NON_PRINTABLE = /[\x00-\x08\x0e-\x1f\x7f-\x9f]/g;
-const BAD_TITLE = /^(course\s*name|anonymous|microsoft\s+word\s*-|\.rtf$|^[\d\s]+$|^[\.\-\s]+$)/i;
+const INVISIBLE_FORMAT =
+  `[\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\uFEFF]`;
+const METADATA_SUFFIX_NOISE = new RegExp(
+  `\\s*\\(\\s*(?:for\\s+)?(?:true\\s+epub|${INVISIBLE_FORMAT}|[.\\s])*\\s*\\)\\s*$`,
+  "iu",
+);
+const BAD_TITLE =
+  /^(course\s*name|anonymous|microsoft\s+word\s*-|\.rtf$|^[\d\s]+$|^[\.\-\s]+$)/i;
 const ISBN = /^[\d][\d\s-]{8,}[\dXx]$/;
 const DATE_STAMP = /^\d{1,4}[/-]\d{1,2}[/-]\d{1,4}([, ]+\d{1,2}:\d{2})?/;
 const HAS_FILE_EXT = /\.[a-zA-Z0-9]{2,4}$/;
 const HAS_REAL_WORD = /[a-zA-Z]{3,}/;
-const WATERMARK = /^(from the library of|wow! ?ebook|converted by|downloaded by|this is a preview|scanned by|digitally signed|d0wnl0ad|www\.)/i;
+const WATERMARK =
+  /^(from the library of|wow! ?ebook|converted by|downloaded by|this is a preview|scanned by|digitally signed|d0wnl0ad|www\.)/i;
 const ARXIV_LINE = /arxiv\s*:\s*\d{4}\.\d+/i;
-const SKIP_LINE = /(provided proper attribution|project gutenberg|abstract|keywords?\s*:|©|fig\.|table\s*\d+|references?\s*|https?:\/\/|all\s+rights\s+reserved|published\s+(as|in)|proceedings\s+of|introduction|page\s*\d+|doi\s*:)/i;
-const AFFILIATION = /^\s*\d+\s+[a-z]|(university|institute|department|research\s+(scientist|fellow|assistant|engineer)|lab[\s,]|google|microsoft|amazon|ibm|meta\s|apple[,\.]|inc[\.\s]|ltd[\.\s]|corp[\.\s])/i;
+const SKIP_LINE =
+  /(provided proper attribution|project gutenberg|abstract|keywords?\s*:|©|fig\.|table\s*\d+|references?\s*|https?:\/\/|all\s+rights\s+reserved|published\s+(as|in)|proceedings\s+of|introduction|page\s*\d+|doi\s*:)/i;
+const AFFILIATION =
+  /^\s*\d+\s+[a-z]|(university|institute|department|research\s+(scientist|fellow|assistant|engineer)|lab[\s,]|google|microsoft|amazon|ibm|meta\s|apple[,\.]|inc[\.\s]|ltd[\.\s]|corp[\.\s])/i;
 
 function isBadMetadata(s: string): boolean {
   if (!s || s === "-" || s.length < 5) return true;
@@ -48,26 +58,38 @@ function isBadMetadata(s: string): boolean {
   if (!HAS_REAL_WORD.test(cleaned)) return true;
   let special = 0;
   for (const c of cleaned) {
-    if (!((c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || c === " ")) special++;
+    if (
+      !((c >= "a" && c <= "z") || (c >= "A" && c <= "Z") ||
+        (c >= "0" && c <= "9") || c === " ")
+    ) special++;
   }
   if (cleaned.length > 10 && special * 100 / cleaned.length > 20) return true;
-  let lower = 0;
-  for (const c of cleaned) {
-    if (c >= "a" && c <= "z") lower++;
-  }
-  if (cleaned.length > 10 && lower === 0) return true;
   return false;
 }
 
 function cleanMetadata(s: string): string {
-  return s.replaceAll(NON_PRINTABLE, "").trim();
+  return s
+    .replaceAll(NON_PRINTABLE, "")
+    .replace(new RegExp(INVISIBLE_FORMAT, "gu"), "")
+    .replaceAll(WHITESPACE, " ")
+    .replace(METADATA_SUFFIX_NOISE, "")
+    .trim();
 }
 
 function looksLikeLegal(s: string): boolean {
   const lower = s.toLowerCase();
-  return ["provided proper attribution", "project gutenberg", "all rights reserved",
-    "permission to reproduce", "scholarly works", "journalistic or scholarly",
-    "reproduce the tables", "terms of service", "license", "copyright"]
+  return [
+    "provided proper attribution",
+    "project gutenberg",
+    "all rights reserved",
+    "permission to reproduce",
+    "scholarly works",
+    "journalistic or scholarly",
+    "reproduce the tables",
+    "terms of service",
+    "license",
+    "copyright",
+  ]
     .some((k) => lower.includes(k));
 }
 
@@ -96,7 +118,9 @@ function titleCaseFilename(filename: string): string {
   let name = basename(filename, extname(filename));
   name = name.replaceAll(/[_\-\.]/g, " ");
   const words = name.split(/\s+/);
-  const result = words.map((w) => w.length > 0 ? w[0]!.toUpperCase() + w.slice(1).toLowerCase() : w).join(" ");
+  const result = words.map((w) =>
+    w.length > 0 ? w[0]!.toUpperCase() + w.slice(1).toLowerCase() : w
+  ).join(" ");
   return result.length < 5 ? `Untitled - ${filename}` : result;
 }
 
@@ -112,7 +136,12 @@ export function extractAuthors(filename: string): string {
 }
 
 export function extractYear(filename: string): number {
-  const matches = filename.match(YEAR_RE);
+  const arxiv = ARXIV_ID.exec(filename);
+  if (arxiv) {
+    const year = 2000 + parseInt(arxiv[0].slice(0, 2));
+    if (year >= 2007 && year <= 2030) return year;
+  }
+  const matches = filename.replace(ARXIV_ID, "").match(YEAR_RE);
   if (matches) {
     const year = parseInt(matches[0]);
     if (year >= 1900 && year <= 2030) return year;
@@ -121,26 +150,32 @@ export function extractYear(filename: string): number {
 }
 
 function decodeHtmlEntities(s: string): string {
-  return s.
-          replaceAll("&amp;", "&").
-          replaceAll("&lt;", "<").
-          replaceAll("&gt;", ">").
-          replaceAll("&quot;", '"').
-          replaceAll("&apos;", "'").
-          replaceAll("&#39;", "'").
-          replaceAll("&#x2F;", "/").
-          replaceAll("&#x60;", "`").
-          replaceAll("&nbsp;", " ");
+  return s
+    .replaceAll("&amp;", "&")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&#39;", "'")
+    .replaceAll("&#x2F;", "/")
+    .replaceAll("&#x60;", "`")
+    .replaceAll("&nbsp;", " ");
 }
 
 function firstXMLField(xml: string, field: string): string {
-  const re = new RegExp(`<(?:[a-zA-Z]+:)?${field}[^>]*>(.*?)</(?:[a-zA-Z]+:)?${field}>`, "is");
+  const re = new RegExp(
+    `<(?:[a-zA-Z]+:)?${field}[^>]*>(.*?)</(?:[a-zA-Z]+:)?${field}>`,
+    "is",
+  );
   const m = xml.match(re);
   return m?.[1]?.trim() ? decodeHtmlEntities(m[1].trim()) : "";
 }
 
 function allXMLFields(xml: string, field: string): string[] {
-  const re = new RegExp(`<(?:[a-zA-Z]+:)?${field}[^>]*>(.*?)</(?:[a-zA-Z]+:)?${field}>`, "gis");
+  const re = new RegExp(
+    `<(?:[a-zA-Z]+:)?${field}[^>]*>(.*?)</(?:[a-zA-Z]+:)?${field}>`,
+    "gis",
+  );
   return [...xml.matchAll(re)]
     .map((m) => decodeHtmlEntities(m[1]!.trim()))
     .filter(Boolean);
@@ -156,7 +191,10 @@ function cleanTitleFromFirstPage(text: string): string {
   const lines = text.split("\n");
   let arxivIdx = -1;
   for (let i = 0; i < lines.length; i++) {
-    if (ARXIV_LINE.test(lines[i]!)) { arxivIdx = i; break; }
+    if (ARXIV_LINE.test(lines[i]!)) {
+      arxivIdx = i;
+      break;
+    }
   }
 
   let startIdx = 0;
@@ -164,7 +202,10 @@ function cleanTitleFromFirstPage(text: string): string {
     for (let i = arxivIdx - 1; i >= 0; i--) {
       const s = lines[i]!.trim();
       if (!s) continue;
-      if (looksLikeLegal(s) || looksLikeAffiliation(s) || s.toLowerCase().includes("arxiv")) continue;
+      if (
+        looksLikeLegal(s) || looksLikeAffiliation(s) ||
+        s.toLowerCase().includes("arxiv")
+      ) continue;
       if (s.length < 10 || s === s.toLowerCase()) continue;
       if (isBadMetadata(s)) continue;
       if (hasAuthorMarker(s)) continue;
@@ -189,12 +230,18 @@ function cleanTitleFromFirstPage(text: string): string {
 }
 
 async function runCommand(cmd: string, args: string[]): Promise<string> {
-  const command = new Deno.Command(cmd, { args, stdout: "piped", stderr: "null" });
+  const command = new Deno.Command(cmd, {
+    args,
+    stdout: "piped",
+    stderr: "null",
+  });
   const output = await command.output();
   return new TextDecoder().decode(output.stdout);
 }
 
-export async function extractPDFMetadata(path: string): Promise<{ title: string; author: string; subject: string }> {
+export async function extractPDFMetadata(
+  path: string,
+): Promise<{ title: string; author: string; subject: string }> {
   try {
     const info = await runCommand("pdfinfo", [path]);
     let title = "", author = "", subject = "";
@@ -210,9 +257,22 @@ export async function extractPDFMetadata(path: string): Promise<{ title: string;
   }
 }
 
-export async function extractEPUBMetadata(path: string): Promise<{ title: string; author: string; description: string; year: number; date: string }> {
-
-  const containerCmd = new Deno.Command("unzip", { args: ["-p", path, "META-INF/container.xml"], stdout: "piped", stderr: "piped" });
+export async function extractEPUBMetadata(
+  path: string,
+): Promise<
+  {
+    title: string;
+    author: string;
+    description: string;
+    year: number;
+    date: string;
+  }
+> {
+  const containerCmd = new Deno.Command("unzip", {
+    args: ["-p", path, "META-INF/container.xml"],
+    stdout: "piped",
+    stderr: "piped",
+  });
   const container = await containerCmd.output();
   if (container.code !== 0) {
     return { title: "", author: "", description: "", year: 0, date: "" };
@@ -225,7 +285,11 @@ export async function extractEPUBMetadata(path: string): Promise<{ title: string
     return { title: "", author: "", description: "", year: 0, date: "" };
   }
 
-  const opfCmd = new Deno.Command("unzip", { args: ["-p", path, m[1]], stdout: "piped", stderr: "piped" });
+  const opfCmd = new Deno.Command("unzip", {
+    args: ["-p", path, m[1]],
+    stdout: "piped",
+    stderr: "piped",
+  });
   const opf = await opfCmd.output();
   if (opf.code !== 0) {
     return { title: "", author: "", description: "", year: 0, date: "" };
@@ -256,13 +320,23 @@ export async function extractTitleFromFirstPage(path: string): Promise<string> {
   }
 }
 
-export async function extractPDF(path: string, filename: string): Promise<Partial<Item>> {
+export async function extractPDF(
+  path: string,
+  filename: string,
+): Promise<Partial<Item>> {
   const info = Deno.statSync(path);
-  const item: Partial<Item> = { path, filename, type: guessType(path, filename), size: info.size };
+  const item: Partial<Item> = {
+    path,
+    filename,
+    type: guessType(path, filename),
+    size: info.size,
+  };
 
   let { title, author, subject } = await extractPDFMetadata(path);
   title = cleanMetadata(title);
-  if (isBadMetadata(title)) title = cleanMetadata(await extractTitleFromFirstPage(path));
+  if (isBadMetadata(title)) {
+    title = cleanMetadata(await extractTitleFromFirstPage(path));
+  }
   if (isBadMetadata(title)) title = extractTitle(filename);
   if (isBadMetadata(title)) title = titleCaseFilename(filename);
   item.title = title;
@@ -299,30 +373,132 @@ function wordBoundaryPattern(p: string): RegExp {
 const CATEGORY_RULES: { patterns: string[]; category: string }[] = [
   { patterns: ["thesis"], category: "thesis" },
   { patterns: ["papers", "research"], category: "research" },
-  { patterns: ["interview", "leetcode", "dsa", "coding interview"], category: "interview-prep" },
-  { patterns: ["system design", "architecture", "distributed system"], category: "system-design" },
-  { patterns: ["machine learning", "deep learning", "neural", "artificial intelligence", "ai", "llm", "large language model", "transformer", "gpt", "natural language processing", "nlp", "computer vision"], category: "machine-learning" },
-  { patterns: ["compiler", "interpreters", "programming language", "parser"], category: "compilers" },
+  {
+    patterns: ["interview", "leetcode", "dsa", "coding interview"],
+    category: "interview-prep",
+  },
+  {
+    patterns: ["system design", "architecture", "distributed system"],
+    category: "system-design",
+  },
+  {
+    patterns: [
+      "machine learning",
+      "deep learning",
+      "neural",
+      "artificial intelligence",
+      "ai",
+      "llm",
+      "large language model",
+      "transformer",
+      "gpt",
+      "natural language processing",
+      "nlp",
+      "computer vision",
+    ],
+    category: "machine-learning",
+  },
+  {
+    patterns: ["compiler", "interpreters", "programming language", "parser"],
+    category: "compilers",
+  },
   { patterns: ["operating system", "linux kernel", "os"], category: "systems" },
   { patterns: ["network", "tcp", "http", "protocol"], category: "networking" },
-  { patterns: ["database", "sql", "postgresql", "nosql", "redis", "mongodb"], category: "databases" },
+  {
+    patterns: ["database", "sql", "postgresql", "nosql", "redis", "mongodb"],
+    category: "databases",
+  },
   { patterns: ["python"], category: "python" },
-  { patterns: ["javascript", "react", "vue", "typescript", "node", "web", "css", "html"], category: "web-dev" },
+  {
+    patterns: [
+      "javascript",
+      "react",
+      "vue",
+      "typescript",
+      "node",
+      "web",
+      "css",
+      "html",
+    ],
+    category: "web-dev",
+  },
   { patterns: ["golang", "go", "goroutine"], category: "go" },
-  { patterns: ["docker", "kubernetes", "devops", "ci cd", "terraform", "ansible"], category: "devops" },
+  {
+    patterns: [
+      "docker",
+      "kubernetes",
+      "devops",
+      "ci cd",
+      "terraform",
+      "ansible",
+    ],
+    category: "devops",
+  },
   { patterns: ["algorithm", "data structure"], category: "algorithms" },
-  { patterns: ["security", "crypto", "cryptography", "cybersecurity", "vulnerability", "penetration"], category: "security" },
-  { patterns: ["design pattern", "software design", "clean code", "refactoring"], category: "software-design" },
-  { patterns: ["agile", "project management", "scrum"], category: "management" },
-  { patterns: ["math", "numerical", "geometry", "statistics", "linear algebra", "calculus"], category: "mathematics" },
-  { patterns: ["physics", "quantum", "mechanics", "thermodynamics"], category: "physics" },
-  { patterns: ["biology", "genetics", "neuroscience", "evolution"], category: "biology" },
-  { patterns: ["philosophy", "african", "nkrumah", "pan african"], category: "philosophy" },
-  { patterns: ["history", "historical", "ancient", "medieval"], category: "history" },
-  { patterns: ["economics", "finance", "investing", "stock", "trading"], category: "economics" },
+  {
+    patterns: [
+      "security",
+      "crypto",
+      "cryptography",
+      "cybersecurity",
+      "vulnerability",
+      "penetration",
+    ],
+    category: "security",
+  },
+  {
+    patterns: [
+      "design pattern",
+      "software design",
+      "clean code",
+      "refactoring",
+    ],
+    category: "software-design",
+  },
+  {
+    patterns: ["agile", "project management", "scrum"],
+    category: "management",
+  },
+  {
+    patterns: [
+      "math",
+      "numerical",
+      "geometry",
+      "statistics",
+      "linear algebra",
+      "calculus",
+    ],
+    category: "mathematics",
+  },
+  {
+    patterns: ["physics", "quantum", "mechanics", "thermodynamics"],
+    category: "physics",
+  },
+  {
+    patterns: ["biology", "genetics", "neuroscience", "evolution"],
+    category: "biology",
+  },
+  {
+    patterns: ["philosophy", "african", "nkrumah", "pan african"],
+    category: "philosophy",
+  },
+  {
+    patterns: ["history", "historical", "ancient", "medieval"],
+    category: "history",
+  },
+  {
+    patterns: ["economics", "finance", "investing", "stock", "trading"],
+    category: "economics",
+  },
   { patterns: ["stoic", "ethics"], category: "philosophy" },
-  { patterns: ["self help", "productivity", "habit", "mindfulness"], category: "self-help" },
-  { patterns: ["fiction", "novel", "science fiction", "fantasy"], category: "fiction" },
+  {
+    patterns: ["self help", "productivity", "habit", "mindfulness"],
+    category: "self-help",
+  },
+  {
+    patterns: ["fiction", "novel", "science fiction", "fantasy"],
+    category: "fiction",
+  },
 ];
 
 export function guessCategory(path: string, filename: string): string {
@@ -382,16 +558,41 @@ export function guessTags(path: string, filename: string): string {
   return tags.join(",");
 }
 
-export function guessPurpose(title: string, category: string, tags: string, description: string, filename: string): string {
-  const combined = (title + " " + category + " " + tags + " " + description + " " + filename).toLowerCase();
+export function guessPurpose(
+  title: string,
+  category: string,
+  tags: string,
+  description: string,
+  filename: string,
+): string {
+  const combined =
+    (title + " " + category + " " + tags + " " + description + " " + filename)
+      .toLowerCase();
 
-  if (combined.includes("interview") || combined.includes("leetcode")) return "interview-prep";
-  if (combined.includes("reference") || combined.includes("handbook") || combined.includes("documentation")) return "reference";
-  if (category === "research" || combined.includes("survey") || ARXIV_ID.test(filename)) return "research";
+  if (combined.includes("interview") || combined.includes("leetcode")) {
+    return "interview-prep";
+  }
+  if (
+    combined.includes("reference") || combined.includes("handbook") ||
+    combined.includes("documentation")
+  ) return "reference";
+  if (
+    category === "research" || combined.includes("survey") ||
+    ARXIV_ID.test(filename)
+  ) return "research";
   if (combined.includes("thesis")) return "academic";
-  if (combined.includes("textbook") || combined.includes("introduction") || combined.includes("course")) return "learning";
-  if (combined.includes("cookbook") || combined.includes("practical") || combined.includes("hands-on")) return "practice";
-  if (combined.includes("self help") || combined.includes("productivity") || combined.includes("habit")) return "self-improvement";
+  if (
+    combined.includes("textbook") || combined.includes("introduction") ||
+    combined.includes("course")
+  ) return "learning";
+  if (
+    combined.includes("cookbook") || combined.includes("practical") ||
+    combined.includes("hands-on")
+  ) return "practice";
+  if (
+    combined.includes("self help") || combined.includes("productivity") ||
+    combined.includes("habit")
+  ) return "self-improvement";
   return "reading";
 }
 
@@ -410,7 +611,7 @@ export async function scanDirectory(
       try {
         for await (const entry of Deno.readDir(dir)) {
           if (entry.name.startsWith(".")) continue;
-          const fullPath = `${dir}/${entry.name}`;
+          const fullPath = join(dir, entry.name);
           if (entry.isDirectory) {
             await scanDir(fullPath, depth + 1);
           } else if (entry.isFile || entry.isSymlink) {
@@ -496,11 +697,15 @@ export async function scanDirectory(
       } else if (ext === ".epub") {
         item = parseFile(path);
         const epub = await extractEPUBMetadata(path);
-        item.title = epub.title ? cleanMetadata(epub.title) : extractTitle(filename);
+        item.title = epub.title
+          ? cleanMetadata(epub.title)
+          : extractTitle(filename);
         if (isBadMetadata(item.title)) item.title = extractTitle(filename);
         if (isBadMetadata(item.title)) item.title = titleCaseFilename(filename);
         item.authors = epub.author || extractAuthors(filename);
-        if (epub.description) item.description = cleanMetadata(epub.description);
+        if (epub.description) {
+          item.description = cleanMetadata(epub.description);
+        }
         item.year = epub.year || extractYear(filename);
       } else {
         item = parseFile(path);
@@ -511,7 +716,14 @@ export async function scanDirectory(
       item.year = item.year || extractYear(filename);
       item.category = item.category || guessCategory(path, filename);
       item.tags = item.tags || guessTags(path, filename);
-      item.purpose = item.purpose || guessPurpose(item.title ?? "", item.category, item.tags, item.description ?? "", filename);
+      item.purpose = item.purpose ||
+        guessPurpose(
+          item.title ?? "",
+          item.category,
+          item.tags,
+          item.description ?? "",
+          filename,
+        );
       item.description = item.description || "";
 
       const upsertResult = db.upsertItem(item as Item);

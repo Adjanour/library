@@ -40,7 +40,7 @@ Your `Deno.serve()` handler runs on a local port. The webview navigates to `http
 
 ## Key Features
 
-- **Small binaries**: Uses OS's built-in webview, not bundled Chromium
+- **Consistent reader rendering**: Uses bundled CEF because Linux WebKitGTK does not reliably complete EPUB chapter iframe loads
 - **Framework auto-detection**: Works with Next.js, SvelteKit, Astro, etc.
 - **Cross-compile**: Build for macOS, Windows, Linux from one machine
 - **Auto-update**: Built-in mechanism with binary-diff patches
@@ -60,7 +60,7 @@ All configuration lives in the `desktop` block in `deno.json`:
       "name": "My App",
       "identifier": "com.example.myapp"
     },
-    "backend": "webview",
+    "backend": "cef",
     "output": {
       "linux": "./dist/my-app"
     }
@@ -134,3 +134,11 @@ deno task desktop         # Build desktop binary
 ```
 
 The binary will be at `dist/app/`.
+
+For the Library-specific build, packaging, and launch-validation commands, use [`docs/desktop-packaging.md`](../docs/desktop-packaging.md). The repository workflow is the source of truth for CI outputs.
+
+## CI packaging status
+
+`.github/workflows/desktop.yml` builds the CEF desktop package on native Linux, Windows, and macOS runners. Linux also launches the packaged executable under Xvfb and verifies `/api/health`; Windows and macOS currently provide build artifacts only.
+
+These artifacts are validation outputs, not release installers yet. Code signing, notarization, platform-specific installer metadata, and real-device reader verification remain required before advertising certified Windows or macOS support.

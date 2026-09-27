@@ -1,3 +1,5 @@
+import type { ReaderPreferences } from '$lib/readerPreferences';
+
 const API = '';
 
 export interface Item {
@@ -48,6 +50,14 @@ export interface Stats {
   total_items: number;
   by_type: Record<string, number>;
   by_category: Record<string, number>;
+}
+
+export interface AppSettings {
+  scan_directories: string[];
+  platform: 'linux' | 'darwin' | 'windows';
+  version: string;
+  smoke_item_id?: number;
+  reading_preferences?: ReaderPreferences;
 }
 
 export interface ReadingProgress {
@@ -144,6 +154,11 @@ export const api = {
   updateItem: (id: number, updates: ItemUpdate) => put<Item>(`/api/items/${id}`, updates),
   delete: (id: number) => del(`/api/items/${id}`),
   scan: () => post<{ indexed: number; total: number }>('/api/scan'),
+  settings: () => get<AppSettings>('/api/settings'),
+  updateSettings: (settings: Pick<AppSettings, 'scan_directories'>) => put<AppSettings>('/api/settings', settings),
+  epubDiagnostic: (payload: Record<string, unknown>) => post<{ ok: true }>('/api/diagnostics/epub', payload),
+  updateReadingPreferences: (preferences: ReaderPreferences) => put<ReaderPreferences>('/api/settings/reading', preferences),
+  quit: () => post<{ status: string }>('/api/quit'),
   tags: () => get<TagCount[]>('/api/tags'),
   purposes: () => get<TagCount[]>('/api/purposes'),
 

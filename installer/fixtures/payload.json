@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "channel": "test",
+  "generated_at": "2026-09-27T00:00:00Z",
+  "packages": [
+    {
+      "id": "library",
+      "display_name": "Library",
+      "version": "0.1.1-test",
+      "license": "MIT",
+      "source_url": "https://example.invalid/library",
+      "optional": false,
+      "artifacts": [
+        {
+          "os": "linux",
+          "arch": "x86_64",
+          "url": "file:///home/bernard/library/installer/fixtures/library-artifact.bin",
+          "sha256": "1886bc6e4a1530bd0a8629fbdc08c7d7f878bbe85befe902c112de9411552a95",
+          "size": 22,
+          "kind": "portable_zip"
+        }
+      ]
+    }
+  ]
+}

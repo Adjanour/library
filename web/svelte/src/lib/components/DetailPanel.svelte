@@ -2,29 +2,31 @@
   import { api, type Item, type ReadingProgress, type ReadingSession } from '$lib/api';
   import { fileExt, formatSize, purposeColor } from '$lib/utils';
   import MetadataEditor from './MetadataEditor.svelte';
+  import { getEpubCoverUrl } from '$lib/epubCache';
+  import PdfPreview from './PdfPreview.svelte';
 
   let {
     item,
     progress,
     sessions,
-    activeSession,
     onOpen,
     onDelete,
     onRead,
     onSaved,
     onProgressChanged,
-    onSessionChanged
+    isQueued,
+    onQueueChanged
   }: {
     item: Item | null;
     progress: ReadingProgress | null;
     sessions: ReadingSession[];
-    activeSession: { item_id: number; session_id: number } | null;
     onOpen: (item: Item) => void;
     onDelete: (item: Item) => void;
     onRead: (item: Item) => void;
     onSaved: (updated: Item) => void;
     onProgressChanged: () => void;
-    onSessionChanged: () => void;
+    isQueued: boolean;
+    onQueueChanged: () => void;
   } = $props();
 
   let editInput = $state({ percent: 0, page: 0, pages: 0 });
@@ -44,6 +46,26 @@
     }
   });
 
+  // Warm up the PDF engine when a PDF is selected so the module parse
+  // (~1MB core + viewer) happens while the user reads metadata, not after
+  // they press Read. Idle-scheduled to avoid hitching the selection itself.
+  $effect(() => {
+    if (!item || fileExt(item.filename) !== 'pdf') return;
+    const warm = () => {
+      import('pdfjs-dist').then((pdfjs) => {
+        (globalThis as any).pdfjsLib = (globalThis as any).pdfjsLib || pdfjs;
+        return import('pdfjs-dist/web/pdf_viewer.mjs');
+      }).catch(() => {});
+      import('pdfjs-dist/web/pdf_viewer.css').catch(() => {});
+    };
+    if ('requestIdleCallback' in window) {
+      const id = (window as any).requestIdleCallback(warm, { timeout: 2000 });
+      return () => (window as any).cancelIdleCallback?.(id);
+    }
+    const t = setTimeout(warm, 300);
+    return () => clearTimeout(t);
+  });
+
   // Load epub cover when item changes
   $effect(() => {
     epubCoverUrl = '';
@@ -54,22 +76,9 @@
     let cancelled = false;
     (async () => {
       try {
-        // @ts-expect-error The package's browser bundle lacks a declaration file.
-        const ePub = (await import('@intity/epub-js/dist/public/epub.js')).default;
-        const res = await fetch(`/api/file/${item.id}`);
-        if (!res.ok || cancelled) return;
-        const buf = await res.arrayBuffer();
+        const url = await getEpubCoverUrl(item.id);
         if (cancelled) return;
-        const book = ePub();
-        await book.open(buf, 'binary');
-        await book.opened;
-        if (cancelled) {
-          book.destroy();
-          return;
-        }
-        const url = await book.coverUrl();
         if (!cancelled) epubCoverUrl = url || '';
-        book.destroy();
       } catch {}
     })();
 
@@ -79,14 +88,6 @@
   const previewUrl = $derived(item ? `/api/file/${item.id}` : '');
   const ext = $derived(item ? fileExt(item.filename) : '');
 
-  async function startReading() {
-    if (!item) return;
-    try { await api.startReading(item.id); onSessionChanged(); } catch (e) { console.error(e); }
-  }
-  async function stopReading() {
-    if (!item) return;
-    try { await api.stopReading(item.id, editInput.page); onSessionChanged(); } catch (e) { console.error(e); }
-  }
   async function updateProgress() {
     if (!item) return;
     try {
@@ -94,6 +95,13 @@
         progress_percent: editInput.percent, current_page: editInput.page, total_pages: editInput.pages
       });
       onProgressChanged();
+    } catch (e) { console.error(e); }
+  }
+  async function addToQueue() {
+    if (!item || isQueued) return;
+    try {
+      await api.addToQueue({ item_id: item.id, title: item.title, author: item.authors });
+      onQueueChanged();
     } catch (e) { console.error(e); }
   }
   async function finishBook() {
@@ -167,6 +175,13 @@
             Read (r)
           </button>
         {/if}
+        {#if !isQueued}
+          <button class="px-3 py-1.5 text-xs bg-surface-2 border border-border rounded hover:bg-surface-3 transition-colors" onclick={addToQueue}>
+            Add to queue
+          </button>
+        {:else}
+          <span class="px-3 py-1.5 text-xs text-success bg-success/10 rounded">Queued</span>
+        {/if}
         <button class="px-3 py-1.5 text-xs bg-error/20 text-error rounded hover:bg-error/30 transition-colors" onclick={() => onDelete(item)}>Delete (d)</button>
       </div>
     </div>
@@ -203,11 +218,7 @@
       </div>
 
       <div class="flex gap-2 flex-wrap">
-        {#if activeSession?.item_id === item.id}
-          <button class="px-2.5 py-1 text-xs bg-warning/20 text-warning rounded hover:bg-warning/30 transition-colors" onclick={stopReading}>Stop Reading</button>
-        {:else}
-          <button class="px-2.5 py-1 text-xs bg-accent/20 text-accent rounded hover:bg-accent/30 transition-colors" onclick={startReading}>Start Reading</button>
-        {/if}
+        <span class="px-2.5 py-1 text-xs text-text-muted bg-surface-2 rounded">Opening the reader starts a session</span>
         <button class="px-2.5 py-1 text-xs bg-surface-2 border border-border rounded hover:bg-surface-3 transition-colors" onclick={updateProgress}>Update</button>
         <button class="px-2.5 py-1 text-xs bg-success/20 text-success rounded hover:bg-success/30 transition-colors" onclick={finishBook}>Mark Finished</button>
       </div>
@@ -226,16 +237,28 @@
     </div>
     {/if}
 
-    <!-- Preview -->
+    <!-- Lightweight first-page preview. PDF.js requests only the ranges
+         needed to inspect page one; the full reader remains on Read. -->
     <div class="flex-1 overflow-hidden bg-surface-1">
       {#if ext === 'pdf'}
-        <iframe src={previewUrl} class="w-full h-full" title="PDF preview"></iframe>
+        <PdfPreview {item} />
       {:else if ext === 'epub' && epubCoverUrl}
         <div class="flex flex-col items-center justify-center h-full p-6 gap-4">
           <img src={epubCoverUrl} alt={item.title} class="max-h-[60%] max-w-full object-contain rounded shadow-lg" />
           <div class="text-center">
             <div class="text-sm font-medium">{item.title}</div>
             <div class="text-xs text-text-muted mt-0.5">{item.authors || 'Unknown author'}</div>
+          </div>
+        </div>
+      {:else if ext === 'epub'}
+        <div class="flex h-full items-center justify-center p-8">
+          <div class="flex aspect-[2/3] w-48 flex-col justify-between rounded-lg border border-accent/30 bg-gradient-to-br from-accent/20 via-surface-2 to-surface-1 p-5 shadow-lg">
+            <div class="text-[10px] uppercase tracking-[0.2em] text-accent">EPUB</div>
+            <div>
+              <div class="text-lg font-semibold leading-tight text-text-primary">{item.title}</div>
+              <div class="mt-2 text-xs text-text-muted">{item.authors || 'Unknown author'}</div>
+            </div>
+            <div class="h-1 w-10 rounded bg-accent"></div>
           </div>
         </div>
       {:else if ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)}

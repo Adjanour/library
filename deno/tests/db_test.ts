@@ -15,7 +15,18 @@ Deno.test("schema creates all tables", () => {
   assertExists(names.includes("reading_progress"));
   assertExists(names.includes("reading_sessions"));
   assertExists(names.includes("reading_queue"));
+  assertExists(names.includes("app_settings"));
 
+  db.close();
+});
+
+Deno.test("application settings persist by key", () => {
+  const db = new DB(":memory:");
+  assertEquals(db.getSetting("scan_directories"), null);
+  db.setSetting("scan_directories", JSON.stringify(["/books"]));
+  assertEquals(db.getSetting("scan_directories"), '["/books"]');
+  db.setSetting("scan_directories", JSON.stringify(["/books", "/papers"]));
+  assertEquals(db.getSetting("scan_directories"), '["/books","/papers"]');
   db.close();
 });
 
@@ -214,9 +225,15 @@ Deno.test("updateItem returns Validation when no fields provided", () => {
 Deno.test("getCategories returns counts grouped by category", () => {
   const db = new DB(":memory:");
 
-  db.connection.prepare("INSERT INTO items (title, path, filename, category) VALUES (?, ?, ?, ?)").run("A1", "/a.pdf", "a.pdf", "cs");
-  db.connection.prepare("INSERT INTO items (title, path, filename, category) VALUES (?, ?, ?, ?)").run("A2", "/b.pdf", "b.pdf", "cs");
-  db.connection.prepare("INSERT INTO items (title, path, filename, category) VALUES (?, ?, ?, ?)").run("A3", "/c.pdf", "c.pdf", "math");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename, category) VALUES (?, ?, ?, ?)",
+  ).run("A1", "/a.pdf", "a.pdf", "cs");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename, category) VALUES (?, ?, ?, ?)",
+  ).run("A2", "/b.pdf", "b.pdf", "cs");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename, category) VALUES (?, ?, ?, ?)",
+  ).run("A3", "/c.pdf", "c.pdf", "math");
 
   const result = db.getCategories();
   assertEquals(result.ok, true);
@@ -234,8 +251,12 @@ Deno.test("getCategories returns counts grouped by category", () => {
 Deno.test("getCategories excludes empty categories", () => {
   const db = new DB(":memory:");
 
-  db.connection.prepare("INSERT INTO items (title, path, filename, category) VALUES (?, ?, ?, ?)").run("A", "/a.pdf", "a.pdf", "cs");
-  db.connection.prepare("INSERT INTO items (title, path, filename) VALUES (?, ?, ?)").run("B", "/b.pdf", "b.pdf");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename, category) VALUES (?, ?, ?, ?)",
+  ).run("A", "/a.pdf", "a.pdf", "cs");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename) VALUES (?, ?, ?)",
+  ).run("B", "/b.pdf", "b.pdf");
 
   const result = db.getCategories();
   assertEquals(result.ok, true);
@@ -250,11 +271,18 @@ Deno.test("getCategories excludes empty categories", () => {
 Deno.test("getTags returns counts from item_tags", () => {
   const db = new DB(":memory:");
 
-  db.connection.prepare("INSERT INTO items (title, path, filename) VALUES (?, ?, ?)").run("A", "/a.pdf", "a.pdf");
-  db.connection.prepare("INSERT INTO items (title, path, filename) VALUES (?, ?, ?)").run("B", "/b.pdf", "b.pdf");
-  db.connection.prepare("INSERT INTO item_tags (item_id, tag) VALUES (?, ?)").run(1, "ml");
-  db.connection.prepare("INSERT INTO item_tags (item_id, tag) VALUES (?, ?)").run(1, "ai");
-  db.connection.prepare("INSERT INTO item_tags (item_id, tag) VALUES (?, ?)").run(2, "ml");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename) VALUES (?, ?, ?)",
+  ).run("A", "/a.pdf", "a.pdf");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename) VALUES (?, ?, ?)",
+  ).run("B", "/b.pdf", "b.pdf");
+  db.connection.prepare("INSERT INTO item_tags (item_id, tag) VALUES (?, ?)")
+    .run(1, "ml");
+  db.connection.prepare("INSERT INTO item_tags (item_id, tag) VALUES (?, ?)")
+    .run(1, "ai");
+  db.connection.prepare("INSERT INTO item_tags (item_id, tag) VALUES (?, ?)")
+    .run(2, "ml");
 
   const result = db.getTags();
   assertEquals(result.ok, true);
@@ -273,9 +301,15 @@ Deno.test("getTags returns counts from item_tags", () => {
 Deno.test("getPurposes returns counts grouped by purpose", () => {
   const db = new DB(":memory:");
 
-  db.connection.prepare("INSERT INTO items (title, path, filename, purpose) VALUES (?, ?, ?, ?)").run("A", "/a.pdf", "a.pdf", "reference");
-  db.connection.prepare("INSERT INTO items (title, path, filename, purpose) VALUES (?, ?, ?, ?)").run("B", "/b.pdf", "b.pdf", "reference");
-  db.connection.prepare("INSERT INTO items (title, path, filename, purpose) VALUES (?, ?, ?, ?)").run("C", "/c.pdf", "c.pdf", "textbook");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename, purpose) VALUES (?, ?, ?, ?)",
+  ).run("A", "/a.pdf", "a.pdf", "reference");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename, purpose) VALUES (?, ?, ?, ?)",
+  ).run("B", "/b.pdf", "b.pdf", "reference");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename, purpose) VALUES (?, ?, ?, ?)",
+  ).run("C", "/c.pdf", "c.pdf", "textbook");
 
   const result = db.getPurposes();
   assertEquals(result.ok, true);
@@ -290,10 +324,25 @@ Deno.test("getPurposes returns counts grouped by purpose", () => {
 Deno.test("search returns all items with empty query", () => {
   const db = new DB(":memory:");
 
-  db.connection.prepare("INSERT INTO items (title, path, filename) VALUES (?, ?, ?)").run("A", "/a.pdf", "a.pdf");
-  db.connection.prepare("INSERT INTO items (title, path, filename) VALUES (?, ?, ?)").run("B", "/b.pdf", "b.pdf");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename) VALUES (?, ?, ?)",
+  ).run("A", "/a.pdf", "a.pdf");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename) VALUES (?, ?, ?)",
+  ).run("B", "/b.pdf", "b.pdf");
 
-  const q: SearchQuery = { q: "", type: "", category: "", tag: "", purpose: "", year: 0, sort: "", order: "", page: 1, limit: 20 };
+  const q: SearchQuery = {
+    q: "",
+    type: "",
+    category: "",
+    tag: "",
+    purpose: "",
+    year: 0,
+    sort: "",
+    order: "",
+    page: 1,
+    limit: 20,
+  };
   const result = db.search(q);
   assertEquals(result.ok, true);
   if (result.ok) {
@@ -305,13 +354,56 @@ Deno.test("search returns all items with empty query", () => {
   db.close();
 });
 
+Deno.test("search treats punctuation in titles as text instead of FTS syntax", () => {
+  const db = new DB(":memory:");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename) VALUES (?, ?, ?)",
+  )
+    .run("A Common-Sense Guide: Data Structures", "/guide.epub", "guide.epub");
+
+  const result = db.search({
+    q: "Common-Sense Guide:",
+    type: "",
+    category: "",
+    tag: "",
+    purpose: "",
+    year: 0,
+    sort: "",
+    order: "",
+    page: 1,
+    limit: 20,
+  });
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.value.items.map((item) => item.title), [
+      "A Common-Sense Guide: Data Structures",
+    ]);
+  }
+  db.close();
+});
+
 Deno.test("search filters by type", () => {
   const db = new DB(":memory:");
 
-  db.connection.prepare("INSERT INTO items (title, path, filename, type) VALUES (?, ?, ?, ?)").run("A", "/a.pdf", "a.pdf", "book");
-  db.connection.prepare("INSERT INTO items (title, path, filename, type) VALUES (?, ?, ?, ?)").run("B", "/b.pdf", "b.pdf", "paper");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename, type) VALUES (?, ?, ?, ?)",
+  ).run("A", "/a.pdf", "a.pdf", "book");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename, type) VALUES (?, ?, ?, ?)",
+  ).run("B", "/b.pdf", "b.pdf", "paper");
 
-  const q: SearchQuery = { q: "", type: "book", category: "", tag: "", purpose: "", year: 0, sort: "", order: "", page: 1, limit: 20 };
+  const q: SearchQuery = {
+    q: "",
+    type: "book",
+    category: "",
+    tag: "",
+    purpose: "",
+    year: 0,
+    sort: "",
+    order: "",
+    page: 1,
+    limit: 20,
+  };
   const result = db.search(q);
   assertEquals(result.ok, true);
   if (result.ok) {
@@ -326,10 +418,23 @@ Deno.test("search paginates results", () => {
   const db = new DB(":memory:");
 
   for (let i = 0; i < 25; i++) {
-    db.connection.prepare("INSERT INTO items (title, path, filename) VALUES (?, ?, ?)").run(`Item ${i}`, `/item${i}.pdf`, `item${i}.pdf`);
+    db.connection.prepare(
+      "INSERT INTO items (title, path, filename) VALUES (?, ?, ?)",
+    ).run(`Item ${i}`, `/item${i}.pdf`, `item${i}.pdf`);
   }
 
-  const q: SearchQuery = { q: "", type: "", category: "", tag: "", purpose: "", year: 0, sort: "", order: "", page: 1, limit: 10 };
+  const q: SearchQuery = {
+    q: "",
+    type: "",
+    category: "",
+    tag: "",
+    purpose: "",
+    year: 0,
+    sort: "",
+    order: "",
+    page: 1,
+    limit: 10,
+  };
   const result = db.search(q);
   assertEquals(result.ok, true);
   if (result.ok) {
@@ -339,7 +444,18 @@ Deno.test("search paginates results", () => {
     assertEquals(result.value.total_pages, 3);
   }
 
-  const q2: SearchQuery = { q: "", type: "", category: "", tag: "", purpose: "", year: 0, sort: "", order: "", page: 3, limit: 10 };
+  const q2: SearchQuery = {
+    q: "",
+    type: "",
+    category: "",
+    tag: "",
+    purpose: "",
+    year: 0,
+    sort: "",
+    order: "",
+    page: 3,
+    limit: 10,
+  };
   const result2 = db.search(q2);
   assertEquals(result2.ok, true);
   if (result2.ok) {
@@ -353,10 +469,25 @@ Deno.test("search paginates results", () => {
 Deno.test("search sorts by year descending", () => {
   const db = new DB(":memory:");
 
-  db.connection.prepare("INSERT INTO items (title, path, filename, year) VALUES (?, ?, ?, ?)").run("Old", "/old.pdf", "old.pdf", 2010);
-  db.connection.prepare("INSERT INTO items (title, path, filename, year) VALUES (?, ?, ?, ?)").run("New", "/new.pdf", "new.pdf", 2024);
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename, year) VALUES (?, ?, ?, ?)",
+  ).run("Old", "/old.pdf", "old.pdf", 2010);
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename, year) VALUES (?, ?, ?, ?)",
+  ).run("New", "/new.pdf", "new.pdf", 2024);
 
-  const q: SearchQuery = { q: "", type: "", category: "", tag: "", purpose: "", year: 0, sort: "year", order: "desc", page: 1, limit: 20 };
+  const q: SearchQuery = {
+    q: "",
+    type: "",
+    category: "",
+    tag: "",
+    purpose: "",
+    year: 0,
+    sort: "year",
+    order: "desc",
+    page: 1,
+    limit: 20,
+  };
   const result = db.search(q);
   assertEquals(result.ok, true);
   if (result.ok) {

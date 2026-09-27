@@ -6,20 +6,17 @@ import (
 
 func TestExtractTitleFromFirstPage(t *testing.T) {
 	tests := []struct {
-		path string
+		name string
+		text string
 		want string
 	}{
-		{"/home/bernard/Documents/Papers/1706.03762v7.pdf", "Attention Is All You Need"},
-		{"/home/bernard/Documents/Papers/2201.03898v1.pdf", "An Introduction to Autoencoders"},
-		{"/home/bernard/Documents/Papers/2402.06196v3.pdf", "Large Language Models: A Survey"},
-		{"/home/bernard/Documents/Papers/2005.14165v4.pdf", "Language Models are Few-Shot Learners"},
-		{"/home/bernard/Documents/Papers/785_StructLM_Towards_Building_.pdf", "StructLM: Towards Building Generalist Models for Structured"},
-		{"/home/bernard/Documents/Papers/50059717-MIT.pdf", "Customizing Mass Housing"},
-		{"/home/bernard/Documents/Papers/2602.02734v2.pdf", "WAXAL: A LARGE-SCALE MULTILINGUAL AFRICAN LANGUAGE SPEECH CORPUS"},
+		{"title after arxiv marker", "arXiv:1706.03762v7 [cs.CL]\nAttention Is All You Need\nAshish Vaswani1\nABSTRACT", "Attention Is All You Need"},
+		{"all-caps title after arxiv marker", "arXiv:2602.02734v2 [eess.AS] 4 Feb 2026\n\nWAXAL: A LARGE-SCALE MULTILINGUAL AFRICAN LANGUAGE SPEECH CORPUS\nAbdoulaye Diack1\nABSTRACT\nThe advancement of speech technology has predominantly favored high-resource languages", "WAXAL: A LARGE-SCALE MULTILINGUAL AFRICAN LANGUAGE SPEECH CORPUS"},
+		{"ordinary first-page title", "\nCustomizing Mass Housing\nA thesis submitted to MIT\n", "Customizing Mass Housing"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			got := extractTitleFromFirstPage(tt.path)
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractTitleFromText(tt.text)
 			if got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
@@ -42,6 +39,7 @@ func TestIsBadMetadata(t *testing.T) {
 		{"Microsoft Word - foo", true},
 		{"Grokking Algorithms", false},
 		{"The Art of the Fugue", false},
+		{"WAXAL: A LARGE-SCALE MULTILINGUAL AFRICAN LANGUAGE SPEECH CORPUS", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {

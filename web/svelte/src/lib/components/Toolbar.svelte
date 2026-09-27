@@ -12,8 +12,11 @@
     onViewChange,
     onToggleTheme,
     onRescan,
+    onShowCommands,
     onShowKeybindings,
-    onTogglePreview
+    onShowSettings,
+    onTogglePreview,
+    onQuit
   }: {
     query: string;
     view: 'grid' | 'list' | 'reading';
@@ -25,8 +28,11 @@
     onViewChange: (v: 'grid' | 'list' | 'reading') => void;
     onToggleTheme: () => void;
     onRescan: () => void;
+    onShowCommands: () => void;
     onShowKeybindings: () => void;
+    onShowSettings: () => void;
     onTogglePreview: () => void;
+    onQuit: () => void;
   } = $props();
 </script>
 
@@ -60,6 +66,10 @@
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
     </button>
 
+    <button class="p-1.5 rounded hover:bg-surface-3 transition-colors" title="Command palette (Ctrl+K)" aria-label="Open command palette" onclick={onShowCommands}>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/><path d="M8 11h6M11 8v6"/></svg>
+    </button>
+
     <button class="p-1.5 rounded hover:bg-surface-3 transition-colors" title="Rescan (R)" onclick={onRescan}>
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" class={loading ? 'animate-spin' : ''}><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
     </button>
@@ -70,8 +80,15 @@
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       {/if}
     </button>
+    <button class="p-1.5 rounded hover:bg-surface-3 transition-colors" title="Settings" aria-label="Open settings" onclick={onShowSettings}>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.17.36.38.7.6 1 .3.35.68.56 1.1.6h.1v4h-.1c-.42.04-.8.25-1.1.6-.22.3-.43.64-.6 1z"/></svg>
+    </button>
     <button class="p-1.5 rounded hover:bg-surface-3 transition-colors" title="Shortcuts (?)" onclick={onShowKeybindings}>
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    </button>
+    <div class="w-px h-5 bg-border"></div>
+    <button class="p-1.5 rounded hover:bg-error/30 text-text-muted hover:text-error transition-colors" title="Quit Library" aria-label="Quit Library" onclick={onQuit}>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
     </button>
   </div>
 

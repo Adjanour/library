@@ -1,5 +1,7 @@
 # How to Build & Install a Deno Desktop App
 
+> This document explains the underlying Deno Desktop concepts. For the current Library commands and release status, start with [`../docs/getting-started.md`](../docs/getting-started.md), [`../docs/desktop-packaging.md`](../docs/desktop-packaging.md), and [`../docs/release-readiness.md`](../docs/release-readiness.md).
+
 A step-by-step guide from the Library project.
 
 ## Prerequisites
@@ -30,7 +32,7 @@ my-app/
   "tasks": {
     "dev": "deno run --allow-all --watch src/main.ts",
     "desktop": "deno desktop --allow-all --include ../web/static src/main.ts",
-    "build:frontend": "cd ../web/svelte && npm run build"
+    "build:frontend": "cd ../web/svelte && pnpm run build"
   },
   "desktop": {
     "app": {
@@ -40,7 +42,7 @@ my-app/
         "linux": "./icon.png"
       }
     },
-    "backend": "webview",
+    "backend": "cef",
     "output": {
       "linux": "../dist/app"
     }
@@ -51,7 +53,7 @@ my-app/
 ### Key points:
 - `"exports"` — entry point for `deno desktop`
 - `"--include ../web/static"` — embeds frontend files in the binary
-- `"backend": "webview"` — uses OS native webview (small binary)
+- `"backend": "cef"` — bundles Chromium for consistent EPUB rendering across platforms
 - `"output"` — where the built app goes
 
 ## Step 3: Write Your Server
@@ -111,7 +113,7 @@ const staticDir = join(
 For SvelteKit with adapter-static:
 
 ```bash
-cd web/svelte && npm run build
+cd web/svelte && pnpm install --frozen-lockfile && pnpm run build
 ```
 
 Output goes to `web/static/` (configured in `svelte.config.js`).

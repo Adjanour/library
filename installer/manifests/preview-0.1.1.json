@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "channel": "preview",
+  "generated_at": "2026-09-27T00:00:00Z",
+  "packages": [
+    {
+      "id": "library",
+      "display_name": "Library",
+      "version": "0.1.1-preview.1",
+      "license": "MIT",
+      "source_url": "https://github.com/Adjanour/library",
+      "optional": false,
+      "artifacts": [
+        {
+          "os": "linux",
+          "arch": "x86_64",
+          "url": "https://github.com/Adjanour/library/releases/download/v0.1.1-preview.1/library-v0.1.1-preview.1-linux.tar.gz",
+          "sha256": "2b93b33fddb43a10ea0b3286c10d7a0b6b5dde7e4242d33c96946ee364c1f9a3",
+          "size": 181526159,
+          "kind": "tar_gz"
+        }
+      ]
+    }
+  ]
+}

@@ -629,6 +629,11 @@ func (db *DB) UpsertReadingProgress(p *models.ReadingProgress) error {
 // --- Reading Sessions ---
 
 func (db *DB) StartReadingSession(itemID int64) (*models.ReadingSession, error) {
+	// Starting a reader is idempotent. The reader starts sessions automatically
+	// while the details panel still exposes a manual start action.
+	if active, err := db.GetActiveSession(itemID); err == nil {
+		return active, nil
+	}
 	result, err := db.conn.Exec(`
 		INSERT INTO reading_sessions (item_id, started_at) VALUES (?, CURRENT_TIMESTAMP)`, itemID)
 	if err != nil {
@@ -744,6 +749,16 @@ func (db *DB) GetReadingQueue() ([]models.ReadingQueueItem, error) {
 }
 
 func (db *DB) AddToReadingQueue(item *models.ReadingQueueItem) error {
+	if item.ItemID != nil {
+		var existingID int64
+		if err := db.conn.QueryRow("SELECT id FROM reading_queue WHERE item_id = ? LIMIT 1", *item.ItemID).Scan(&existingID); err == nil {
+			item.ID = existingID
+			return nil
+		}
+	}
+	if item.Priority == 0 {
+		_ = db.conn.QueryRow("SELECT COALESCE(MAX(priority) + 1, 0) FROM reading_queue").Scan(&item.Priority)
+	}
 	result, err := db.conn.Exec(`
 		INSERT INTO reading_queue (item_id, focusd_book_number, title, author, priority)
 		VALUES (?, ?, ?, ?, ?)`,

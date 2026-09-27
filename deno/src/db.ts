@@ -23,18 +23,17 @@ import {
   type Result,
   Validation,
 } from "./result.ts";
+import { appDataRoot } from "./platform.ts";
 
 const DEFAULT_DB_DIR = join(
-  Deno.env.get("HOME") ?? "~",
-  ".local",
-  "share",
+  appDataRoot(),
   "library",
 );
 const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, "library.db");
 
 function toFTSQuery(input: string): string {
-  const parts = input.split(/\s+/).filter(Boolean);
-  return parts.map((p) => p.replace(/['"*]+/g, "") + "*").join(" AND ");
+  const parts = input.match(/[\p{L}\p{N}]+/gu) ?? [];
+  return parts.map((part) => `"${part}"*`).join(" AND ");
 }
 
 export class DB {
@@ -209,10 +208,32 @@ export class DB {
         added_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    this.conn.exec(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
   }
 
   get connection(): DatabaseSync {
     return this.conn;
+  }
+
+  getSetting(key: string): string | null {
+    const row = this.conn.prepare(
+      "SELECT value FROM app_settings WHERE key = ?",
+    ).get(key) as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  setSetting(key: string, value: string): void {
+    this.conn.prepare(`
+      INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+    `).run(key, value);
   }
 
   getItem(id: number): Result<Item, AppError<"NOT_FOUND" | "DATABASE">> {
@@ -305,43 +326,51 @@ export class DB {
       recent_added: [],
     };
 
-     try{
-      const totalRow = this.conn.prepare("SELECT COUNT(*) as c FROM items").get() as { c: number };
+    try {
+      const totalRow = this.conn.prepare("SELECT COUNT(*) as c FROM items")
+        .get() as { c: number };
 
       stats.total_items = totalRow.c;
 
-      const typeRows = this.conn.prepare("SELECT type, COUNT(*) as c FROM items GROUP BY type").all() as { type: string; c: number }[];
+      const typeRows = this.conn.prepare(
+        "SELECT type, COUNT(*) as c FROM items GROUP BY type",
+      ).all() as { type: string; c: number }[];
 
       for (const row of typeRows) {
         stats.by_type[row.type] = row.c;
       }
 
-      const categoryRows = this.conn.prepare("SELECT category, COUNT(*) as c FROM items WHERE category != '' GROUP BY category ORDER BY c DESC").all() as { category: string; c: number }[];
+      const categoryRows = this.conn.prepare(
+        "SELECT category, COUNT(*) as c FROM items WHERE category != '' GROUP BY category ORDER BY c DESC",
+      ).all() as { category: string; c: number }[];
 
       for (const row of categoryRows) {
         stats.by_category[row.category] = row.c;
       }
 
-      const yearRows = this.conn.prepare("SELECT CAST(year AS TEXT) as year, COUNT(*) as c FROM items WHERE year > 0 GROUP BY year").all() as { year: string; c: number }[];
+      const yearRows = this.conn.prepare(
+        "SELECT CAST(year AS TEXT) as year, COUNT(*) as c FROM items WHERE year > 0 GROUP BY year",
+      ).all() as { year: string; c: number }[];
 
       for (const row of yearRows) {
         stats.by_year[row.year] = row.c;
       }
 
-      const recentRows = this.conn.prepare("SELECT id, title, authors, year, path, filename, type, category, tags, purpose, description, size, added_at, updated_at FROM items ORDER BY added_at DESC LIMIT 10").all() as unknown as Item[];
+      const recentRows = this.conn.prepare(
+        "SELECT id, title, authors, year, path, filename, type, category, tags, purpose, description, size, added_at, updated_at FROM items ORDER BY added_at DESC LIMIT 10",
+      ).all() as unknown as Item[];
 
       stats.recent_added = recentRows;
       return Ok(stats);
-
-     } catch(e){
-        return Err(DatabaseError("SELECT * FROM items", e))
-     }
+    } catch (e) {
+      return Err(DatabaseError("SELECT * FROM items", e));
+    }
   }
 
   getCategories(): Result<CategoryCount[], AppError<"DATABASE">> {
     try {
       const rows = this.conn.prepare(
-        "SELECT category as name, COUNT(*) as count FROM items WHERE category != '' GROUP BY category ORDER BY count DESC"
+        "SELECT category as name, COUNT(*) as count FROM items WHERE category != '' GROUP BY category ORDER BY count DESC",
       ).all() as unknown as CategoryCount[];
       return Ok(rows);
     } catch (e) {
@@ -352,7 +381,7 @@ export class DB {
   getTags(): Result<TagCount[], AppError<"DATABASE">> {
     try {
       const rows = this.conn.prepare(
-        "SELECT tag as name, COUNT(*) as count FROM item_tags GROUP BY tag ORDER BY count DESC"
+        "SELECT tag as name, COUNT(*) as count FROM item_tags GROUP BY tag ORDER BY count DESC",
       ).all() as unknown as TagCount[];
       return Ok(rows);
     } catch (e) {
@@ -363,7 +392,7 @@ export class DB {
   getPurposes(): Result<TagCount[], AppError<"DATABASE">> {
     try {
       const rows = this.conn.prepare(
-        "SELECT purpose as name, COUNT(*) as count FROM items WHERE purpose != '' GROUP BY purpose ORDER BY count DESC"
+        "SELECT purpose as name, COUNT(*) as count FROM items WHERE purpose != '' GROUP BY purpose ORDER BY count DESC",
       ).all() as unknown as TagCount[];
       return Ok(rows);
     } catch (e) {
@@ -382,52 +411,87 @@ export class DB {
       if (q.q) {
         const like = `%${q.q}%`;
         if (this._fts) {
-          where.push("(id IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?) OR purpose LIKE ?)");
+          where.push(
+            "(id IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ?) OR purpose LIKE ?)",
+          );
           args.push(toFTSQuery(q.q), like);
         } else {
-          where.push("(title LIKE ? OR authors LIKE ? OR filename LIKE ? OR description LIKE ? OR purpose LIKE ?)");
+          where.push(
+            "(title LIKE ? OR authors LIKE ? OR filename LIKE ? OR description LIKE ? OR purpose LIKE ?)",
+          );
           args.push(like, like, like, like, like);
         }
       }
-      if (q.type) { where.push("type = ?"); args.push(q.type); }
-      if (q.category) { where.push("category = ?"); args.push(q.category); }
-      if (q.tag) { where.push("id IN (SELECT item_id FROM item_tags WHERE tag = ?)"); args.push(q.tag); }
-      if (q.purpose) { where.push("purpose = ?"); args.push(q.purpose); }
-      if (q.year > 0) { where.push("year = ?"); args.push(q.year); }
+      if (q.type) {
+        where.push("type = ?");
+        args.push(q.type);
+      }
+      if (q.category) {
+        where.push("category = ?");
+        args.push(q.category);
+      }
+      if (q.tag) {
+        where.push("id IN (SELECT item_id FROM item_tags WHERE tag = ?)");
+        args.push(q.tag);
+      }
+      if (q.purpose) {
+        where.push("purpose = ?");
+        args.push(q.purpose);
+      }
+      if (q.year > 0) {
+        where.push("year = ?");
+        args.push(q.year);
+      }
 
-      const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+      const whereClause = where.length > 0
+        ? `WHERE ${where.join(" AND ")}`
+        : "";
 
       let orderClause = "ORDER BY title ASC";
       switch (q.sort) {
-        case "year": orderClause = "ORDER BY year DESC"; break;
-        case "added": orderClause = "ORDER BY added_at DESC"; break;
-        case "size": orderClause = "ORDER BY size DESC"; break;
+        case "year":
+          orderClause = "ORDER BY year DESC";
+          break;
+        case "added":
+          orderClause = "ORDER BY added_at DESC";
+          break;
+        case "size":
+          orderClause = "ORDER BY size DESC";
+          break;
       }
       if (q.order === "asc" && q.sort) {
         orderClause = orderClause.replace("DESC", "ASC");
       }
 
       const countRow = this.conn.prepare(
-        `SELECT COUNT(*) as c FROM items ${whereClause}`
+        `SELECT COUNT(*) as c FROM items ${whereClause}`,
       ).get(...args) as { c: number };
       const total = countRow.c;
 
       const offset = (q.page - 1) * q.limit;
       const queryParams = [...args, q.limit, offset];
       const items = this.conn.prepare(
-        `SELECT * FROM items ${whereClause} ${orderClause} LIMIT ? OFFSET ?`
+        `SELECT * FROM items ${whereClause} ${orderClause} LIMIT ? OFFSET ?`,
       ).all(...queryParams) as unknown as Item[];
 
       const totalPages = Math.ceil(total / q.limit);
 
-      return Ok({ items, total, page: q.page, limit: q.limit, total_pages: totalPages });
+      return Ok({
+        items,
+        total,
+        page: q.page,
+        limit: q.limit,
+        total_pages: totalPages,
+      });
     } catch (e) {
       return Err(DatabaseError("search", e));
     }
   }
 
   getAllPaths(): string[] {
-    const rows = this.conn.prepare("SELECT path FROM items").all() as { path: string }[];
+    const rows = this.conn.prepare("SELECT path FROM items").all() as {
+      path: string;
+    }[];
     return rows.map((r) => r.path);
   }
 
@@ -436,13 +500,17 @@ export class DB {
   }
 
   getItemByPath(path: string): Result<Item> {
-    const row = this.conn.prepare("SELECT * FROM items WHERE path = ?").get(path) as Item | undefined;
+    const row = this.conn.prepare("SELECT * FROM items WHERE path = ?").get(
+      path,
+    ) as Item | undefined;
     if (!row) return Err(NotFound("Item", path));
     return Ok(row);
   }
 
   updatePath(id: number, newPath: string): void {
-    this.conn.prepare("UPDATE items SET path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newPath, id);
+    this.conn.prepare(
+      "UPDATE items SET path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    ).run(newPath, id);
   }
 
   upsertItem(item: Item): Result<void> {
@@ -456,8 +524,17 @@ export class DB {
           tags = excluded.tags, purpose = excluded.purpose, description = excluded.description,
           size = excluded.size, updated_at = CURRENT_TIMESTAMP
       `).run(
-        item.title, item.authors, item.year, item.path, item.filename,
-        item.type, item.category, item.tags, item.purpose, item.description, item.size,
+        item.title,
+        item.authors,
+        item.year,
+        item.path,
+        item.filename,
+        item.type,
+        item.category,
+        item.tags,
+        item.purpose,
+        item.description,
+        item.size,
       );
     });
   }
@@ -470,13 +547,14 @@ export class DB {
 
   getReadingProgress(itemID: number): ReadingProgress | null {
     const row = this.conn.prepare(
-      "SELECT * FROM reading_progress WHERE item_id = ?"
+      "SELECT * FROM reading_progress WHERE item_id = ?",
     ).get(itemID) as unknown as ReadingProgress | undefined;
     return row ?? null;
   }
 
   getAllReadingProgress(): ReadingProgress[] {
-    return this.conn.prepare("SELECT * FROM reading_progress").all() as unknown as ReadingProgress[];
+    return this.conn.prepare("SELECT * FROM reading_progress")
+      .all() as unknown as ReadingProgress[];
   }
 
   upsertReadingProgress(p: ReadingProgress): void {
@@ -490,12 +568,23 @@ export class DB {
         finished_at = COALESCE(excluded.finished_at, reading_progress.finished_at),
         last_read_at = COALESCE(excluded.last_read_at, reading_progress.last_read_at),
         updated_at = CURRENT_TIMESTAMP
-    `).run(p.item_id, p.status, p.progress_percent, p.current_page, p.total_pages, p.started_at, p.finished_at, p.last_read_at);
+    `).run(
+      p.item_id,
+      p.status,
+      p.progress_percent,
+      p.current_page,
+      p.total_pages,
+      p.started_at,
+      p.finished_at,
+      p.last_read_at,
+    );
   }
 
   // Reading Sessions
 
   startReadingSession(itemID: number): ReadingSession {
+    const active = this.getActiveSession(itemID);
+    if (active) return active;
     const result = this.conn.prepare(`
       INSERT INTO reading_sessions (item_id, started_at) VALUES (?, CURRENT_TIMESTAMP)
     `).run(itemID);
@@ -504,7 +593,9 @@ export class DB {
       UPDATE reading_progress SET status = 'reading', started_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
       WHERE item_id = ?
     `).run(itemID);
-    return this.conn.prepare("SELECT * FROM reading_sessions WHERE id = ?").get(id) as unknown as ReadingSession;
+    return this.conn.prepare("SELECT * FROM reading_sessions WHERE id = ?").get(
+      id,
+    ) as unknown as ReadingSession;
   }
 
   stopReadingSession(sessionID: number, pagesRead: number): void {
@@ -515,14 +606,14 @@ export class DB {
 
   getActiveSession(itemID: number): ReadingSession | null {
     const row = this.conn.prepare(
-      "SELECT * FROM reading_sessions WHERE item_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1"
+      "SELECT * FROM reading_sessions WHERE item_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
     ).get(itemID) as ReadingSession | undefined;
     return row ?? null;
   }
 
   getReadingSessions(itemID: number, limit: number): ReadingSession[] {
     return this.conn.prepare(
-      "SELECT * FROM reading_sessions WHERE item_id = ? ORDER BY started_at DESC LIMIT ?"
+      "SELECT * FROM reading_sessions WHERE item_id = ? ORDER BY started_at DESC LIMIT ?",
     ).all(itemID, limit) as unknown as ReadingSession[];
   }
 
@@ -530,14 +621,35 @@ export class DB {
 
   getReadingQueue(): ReadingQueueItem[] {
     return this.conn.prepare(
-      "SELECT q.*, i.path as file_path, i.filename, i.type as file_type FROM reading_queue q LEFT JOIN items i ON q.item_id = i.id ORDER BY q.priority"
+      "SELECT q.*, i.path as file_path, i.filename, i.type as file_type FROM reading_queue q LEFT JOIN items i ON q.item_id = i.id ORDER BY q.priority",
     ).all() as unknown as ReadingQueueItem[];
   }
 
   addToReadingQueue(item: ReadingQueueItem): void {
+    if (item.item_id !== null && item.item_id !== undefined) {
+      const existing = this.conn.prepare(
+        "SELECT id FROM reading_queue WHERE item_id = ? LIMIT 1",
+      ).get(item.item_id) as { id: number } | undefined;
+      if (existing) {
+        item.id = existing.id;
+        return;
+      }
+    }
+    if (item.priority === 0) {
+      const next = this.conn.prepare(
+        "SELECT COALESCE(MAX(priority) + 1, 0) as priority FROM reading_queue",
+      ).get() as { priority: number };
+      item.priority = next.priority;
+    }
     this.conn.prepare(`
       INSERT INTO reading_queue (item_id, focusd_book_number, title, author, priority) VALUES (?, ?, ?, ?, ?)
-    `).run(item.item_id, item.focusd_book_number, item.title, item.author, item.priority);
+    `).run(
+      item.item_id,
+      item.focusd_book_number,
+      item.title,
+      item.author,
+      item.priority,
+    );
   }
 
   removeFromReadingQueue(id: number): void {
@@ -548,7 +660,8 @@ export class DB {
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
       if (id !== undefined) {
-        this.conn.prepare("UPDATE reading_queue SET priority = ? WHERE id = ?").run(i, id);
+        this.conn.prepare("UPDATE reading_queue SET priority = ? WHERE id = ?")
+          .run(i, id);
       }
     }
   }
@@ -559,6 +672,9 @@ export class DB {
     this.conn.prepare(`
       UPDATE reading_progress SET status = 'finished', progress_percent = 100, finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE item_id = ?
     `).run(itemID);
+    this.conn.prepare("DELETE FROM reading_queue WHERE item_id = ?").run(
+      itemID,
+    );
     const session = this.getActiveSession(itemID);
     if (session) {
       this.stopReadingSession(session.id, 0);
@@ -574,7 +690,9 @@ export class DB {
     `).all() as unknown as (Item & ReadingProgress)[];
 
     const queue = this.getReadingQueue();
-    const totalReadBooks = (this.conn.prepare("SELECT COUNT(*) as c FROM reading_progress WHERE status = 'finished'").get() as { c: number }).c;
+    const totalReadBooks = (this.conn.prepare(
+      "SELECT COUNT(*) as c FROM reading_progress WHERE status = 'finished'",
+    ).get() as { c: number }).c;
     const todayMinutes = this.conn.prepare(`
       SELECT COALESCE(SUM(duration_seconds), 0) / 60 as m FROM reading_sessions WHERE started_at >= date('now', 'start of day')
     `).get() as { m: number };
@@ -584,8 +702,33 @@ export class DB {
 
     return {
       currently_reading: currentlyReading.map((r) => ({
-        item: { id: r.id, title: r.title, authors: r.authors, year: r.year, path: r.path, filename: r.filename, type: r.type, category: r.category, tags: r.tags, purpose: r.purpose, description: r.description, size: r.size, added_at: r.added_at, updated_at: r.updated_at },
-        progress: { item_id: r.item_id, status: r.status, progress_percent: r.progress_percent, current_page: r.current_page, total_pages: r.total_pages, started_at: r.started_at, finished_at: r.finished_at, last_read_at: r.last_read_at, updated_at: r.updated_at },
+        item: {
+          id: r.id,
+          title: r.title,
+          authors: r.authors,
+          year: r.year,
+          path: r.path,
+          filename: r.filename,
+          type: r.type,
+          category: r.category,
+          tags: r.tags,
+          purpose: r.purpose,
+          description: r.description,
+          size: r.size,
+          added_at: r.added_at,
+          updated_at: r.updated_at,
+        },
+        progress: {
+          item_id: r.item_id,
+          status: r.status,
+          progress_percent: r.progress_percent,
+          current_page: r.current_page,
+          total_pages: r.total_pages,
+          started_at: r.started_at,
+          finished_at: r.finished_at,
+          last_read_at: r.last_read_at,
+          updated_at: r.updated_at,
+        },
         today_minutes: 0,
         total_minutes: 0,
       })),
