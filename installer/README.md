@@ -45,11 +45,13 @@ mise exec -- zig build run -- install /tmp/library-manifest.signed --root /tmp/l
 
 The HTTPS downloader is compile-verified on Linux, Windows, and macOS targets. The CI download harness exercises redirects, retries, size rejection, checksum rejection, and cache promotion against a local HTTP server. HTTPS certificate-chain testing remains separate because Zig 0.16's standard client does not currently make a local test CA straightforward to inject; production downloads remain HTTPS-only by default, while `--allow-http` is an explicit test-only escape hatch.
 
-GitHub Actions runs the download and Web Preview integration suites on Linux
-and separately verifies Windows and macOS cross-builds. The protected publish
-workflow builds small release binaries, signs the Web Preview manifest from a
-repository secret, checks the pinned public key, and attaches the results to
-the preview release.
+GitHub Actions runs the download and Web Preview integration suites on Linux.
+A native macOS runner executes the installer tests, builds the ReleaseSmall
+binary, inspects it, and runs its command-line help. CI also verifies the
+Windows x86_64, Intel macOS, and Apple Silicon macOS cross-builds. The
+protected publish workflow builds small release binaries, signs the Web
+Preview manifest from a repository secret, checks the pinned public key, and
+attaches the results to the preview release.
 
 The Linux host build is verified locally. The executable cross-compiles for
 Windows x86_64, Intel macOS, and Apple Silicon macOS. Those targets are
