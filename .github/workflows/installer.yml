@@ -74,3 +74,29 @@ jobs:
       - name: Cross-build installer
         working-directory: installer
         run: mise exec -- zig build -Dtarget=${{ matrix.target }} --summary all
+
+  test-macos:
+    name: Installer tests (native macOS)
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        uses: jdx/mise-action@v2
+        with:
+          cache: true
+
+      - name: Check Zig version
+        run: mise exec -- zig version
+
+      - name: Unit and platform integration tests
+        working-directory: installer
+        run: mise exec -- zig build test --summary all
+
+      - name: Build and inspect native installer
+        working-directory: installer
+        run: |
+          mise exec -- zig build -Doptimize=ReleaseSmall --summary all
+          file zig-out/bin/library-setup
+          zig-out/bin/library-setup --help

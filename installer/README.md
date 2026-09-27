@@ -29,8 +29,9 @@ The public `web-preview` command pins the release public key rather than
 trusting a key supplied by the manifest. It extracts ZIP files with Zig's
 standard library, keeps Deno under the chosen user-owned root, caches locked
 dependencies into that root, writes version pointers, and creates a launcher
-that opens the local browser interface. Running the setup binary without a
-command selects this path.
+that opens the local browser interface. Linux also receives a user application
+menu entry. macOS receives `~/Applications/Library Web Preview.app`. Running
+the setup binary without a command selects this path.
 
 `sign-manifest` is a development fixture tool. Release CI must sign generated manifests using a protected signing secret, not a command-line seed.
 
@@ -54,7 +55,7 @@ The Linux host build is verified locally. The executable cross-compiles for
 Windows x86_64, Intel macOS, and Apple Silicon macOS. Those targets are
 available for Web Preview testing but remain unsigned, unnotarized, and not
 release-certified. The installer does not yet install Readest or Sioyek or
-create platform desktop entries.
+create a Windows Start Menu entry.
 
 ## No sudo required
 

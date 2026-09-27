@@ -9,13 +9,16 @@ pub const Options = struct {
     ca_cert_path: ?[]const u8 = null,
     allow_insecure_http: bool = false,
     environ_map: ?*const std.process.Environ.Map = null,
+    create_shortcuts: bool = true,
 };
 
 pub const Result = struct {
     launcher_path: []u8,
+    shortcut_path: ?[]u8 = null,
 
     pub fn deinit(self: Result, allocator: std.mem.Allocator) void {
         allocator.free(self.launcher_path);
+        if (self.shortcut_path) |path| allocator.free(path);
     }
 };
 
@@ -90,7 +93,12 @@ pub fn install(
     try printStatus(io, "Caching locked dependencies for offline restarts...");
     try cacheDependencies(io, allocator, options, app.package.version, runtime.package.version, target);
     try printStatus(io, "Creating the launcher...");
-    return writeLauncher(io, allocator, root, options.root, target);
+    var result = try writeLauncher(io, allocator, root, options.root, target);
+    errdefer result.deinit(allocator);
+    if (options.create_shortcuts) {
+        result.shortcut_path = try createPlatformShortcut(io, allocator, options, result.launcher_path, app.package.version, target);
+    }
+    return result;
 }
 
 fn printStatus(io: std.Io, message: []const u8) !void {
@@ -234,6 +242,126 @@ fn writeLauncher(io: std.Io, allocator: std.mem.Allocator, root: std.Io.Dir, roo
     return .{ .launcher_path = try std.fs.path.join(allocator, &.{ root_path, relative_path }) };
 }
 
+fn createPlatformShortcut(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    options: Options,
+    launcher_path: []const u8,
+    app_version: []const u8,
+    target: platform.Target,
+) !?[]u8 {
+    const environ = options.environ_map orelse return null;
+    return switch (target.os) {
+        .windows => null,
+        .linux => try createLinuxShortcut(io, allocator, environ.*, launcher_path),
+        .macos => try createMacShortcut(io, allocator, environ.*, launcher_path, app_version),
+    };
+}
+
+fn createLinuxShortcut(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ: std.process.Environ.Map,
+    launcher_path: []const u8,
+) ![]u8 {
+    try validateShortcutPath(launcher_path);
+    const data_home = if (environ.get("XDG_DATA_HOME")) |value|
+        try allocator.dupe(u8, value)
+    else
+        try std.fs.path.join(allocator, &.{
+            environ.get("HOME") orelse return error.HomeDirectoryUnavailable,
+            ".local",
+            "share",
+        });
+    defer allocator.free(data_home);
+    const applications_dir = try std.fs.path.join(allocator, &.{ data_home, "applications" });
+    defer allocator.free(applications_dir);
+    try std.Io.Dir.cwd().createDirPath(io, applications_dir);
+    var directory = try std.Io.Dir.openDirAbsolute(io, applications_dir, .{});
+    defer directory.close(io);
+
+    var entry = try directory.createFileAtomic(io, "library-web-preview.desktop", .{ .replace = true });
+    defer entry.deinit(io);
+    var buffer: [2048]u8 = undefined;
+    var writer = entry.file.writer(io, &buffer);
+    try writer.interface.print(
+        "[Desktop Entry]\n" ++
+            "Type=Application\n" ++
+            "Name=Library Web Preview\n" ++
+            "Comment=Read local books and papers\n" ++
+            "Exec=\"{s}\"\n" ++
+            "Icon=accessories-ebook-reader\n" ++
+            "Terminal=true\n" ++
+            "Categories=Office;Viewer;\n" ++
+            "StartupNotify=true\n",
+        .{launcher_path},
+    );
+    try writer.flush();
+    try entry.replace(io);
+    return std.fs.path.join(allocator, &.{ applications_dir, "library-web-preview.desktop" });
+}
+
+fn createMacShortcut(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    environ: std.process.Environ.Map,
+    launcher_path: []const u8,
+    app_version: []const u8,
+) ![]u8 {
+    try validateShortcutPath(launcher_path);
+    const home = environ.get("HOME") orelse return error.HomeDirectoryUnavailable;
+    const app_path = try std.fs.path.join(allocator, &.{ home, "Applications", "Library Web Preview.app" });
+    errdefer allocator.free(app_path);
+    const contents_path = try std.fs.path.join(allocator, &.{ app_path, "Contents" });
+    defer allocator.free(contents_path);
+    const executable_path = try std.fs.path.join(allocator, &.{ contents_path, "MacOS" });
+    defer allocator.free(executable_path);
+    try std.Io.Dir.cwd().createDirPath(io, executable_path);
+
+    var contents = try std.Io.Dir.openDirAbsolute(io, contents_path, .{});
+    defer contents.close(io);
+    var plist = try contents.createFileAtomic(io, "Info.plist", .{ .replace = true });
+    defer plist.deinit(io);
+    var plist_buffer: [4096]u8 = undefined;
+    var plist_writer = plist.file.writer(io, &plist_buffer);
+    try plist_writer.interface.print(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" ++
+            "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" ++
+            "<plist version=\"1.0\"><dict>\n" ++
+            "<key>CFBundleDevelopmentRegion</key><string>en</string>\n" ++
+            "<key>CFBundleExecutable</key><string>Library Web Preview</string>\n" ++
+            "<key>CFBundleIdentifier</key><string>com.bernard.library.web-preview</string>\n" ++
+            "<key>CFBundleName</key><string>Library Web Preview</string>\n" ++
+            "<key>CFBundlePackageType</key><string>APPL</string>\n" ++
+            "<key>CFBundleShortVersionString</key><string>{s}</string>\n" ++
+            "<key>LSMinimumSystemVersion</key><string>12.0</string>\n" ++
+            "</dict></plist>\n",
+        .{app_version},
+    );
+    try plist_writer.flush();
+    try plist.replace(io);
+
+    var executable_dir = try std.Io.Dir.openDirAbsolute(io, executable_path, .{});
+    defer executable_dir.close(io);
+    var launcher = try executable_dir.createFileAtomic(io, "Library Web Preview", .{ .replace = true });
+    defer launcher.deinit(io);
+    try launcher.file.setPermissions(io, .executable_file);
+    var launcher_buffer: [2048]u8 = undefined;
+    var launcher_writer = launcher.file.writer(io, &launcher_buffer);
+    try launcher_writer.interface.print("#!/bin/sh\nexec \"{s}\" \"$@\"\n", .{launcher_path});
+    try launcher_writer.flush();
+    try launcher.replace(io);
+    return app_path;
+}
+
+fn validateShortcutPath(path: []const u8) !void {
+    for (path) |char| {
+        if (char == '"' or char == '\\' or char == '$' or char == '`' or char == '\n' or char == '\r') {
+            return error.UnsafeShortcutPath;
+        }
+    }
+}
+
 fn directoryExists(io: std.Io, root: std.Io.Dir, path: []const u8) bool {
     var directory = root.openDir(io, path, .{}) catch return false;
     directory.close(io);
@@ -263,4 +391,59 @@ fn writePointer(io: std.Io, root: std.Io.Dir, path: []const u8, value: []const u
     try writer.interface.print("{s}\n", .{value});
     try writer.flush();
     try file.replace(io);
+}
+
+test "Linux integration writes a user-owned desktop entry" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const allocator = std.testing.allocator;
+    const cwd = try std.process.currentPathAlloc(std.testing.io, allocator);
+    defer allocator.free(cwd);
+    const home = try std.fs.path.join(allocator, &.{ cwd, ".zig-cache", "tmp", tmp.sub_path[0..] });
+    defer allocator.free(home);
+    const data_home = try std.fs.path.join(allocator, &.{ home, "data" });
+    defer allocator.free(data_home);
+    const launcher_path = try std.fs.path.join(allocator, &.{ home, "library", "web-preview", "bin", "library-web-preview" });
+    defer allocator.free(launcher_path);
+    var environ = std.process.Environ.Map.init(allocator);
+    defer environ.deinit();
+    try environ.put("HOME", home);
+    try environ.put("XDG_DATA_HOME", data_home);
+
+    const shortcut = try createLinuxShortcut(std.testing.io, allocator, environ, launcher_path);
+    defer allocator.free(shortcut);
+    var shortcut_file = try std.Io.Dir.openFileAbsolute(std.testing.io, shortcut, .{});
+    defer shortcut_file.close(std.testing.io);
+    var buffer: [2048]u8 = undefined;
+    var reader = shortcut_file.reader(std.testing.io, &buffer);
+    const contents = try reader.interface.allocRemaining(allocator, .limited(4096));
+    defer allocator.free(contents);
+    try std.testing.expect(std.mem.indexOf(u8, contents, launcher_path) != null);
+    try std.testing.expect(std.mem.indexOf(u8, contents, "Terminal=true") != null);
+}
+
+test "macOS integration writes a launchable user app bundle" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const allocator = std.testing.allocator;
+    const cwd = try std.process.currentPathAlloc(std.testing.io, allocator);
+    defer allocator.free(cwd);
+    const home = try std.fs.path.join(allocator, &.{ cwd, ".zig-cache", "tmp", tmp.sub_path[0..] });
+    defer allocator.free(home);
+    const launcher_path = try std.fs.path.join(allocator, &.{ home, "Library Preview", "web-preview", "bin", "library-web-preview" });
+    defer allocator.free(launcher_path);
+    var environ = std.process.Environ.Map.init(allocator);
+    defer environ.deinit();
+    try environ.put("HOME", home);
+
+    const app_path = try createMacShortcut(std.testing.io, allocator, environ, launcher_path, "0.1.1-test");
+    defer allocator.free(app_path);
+    var app = try std.Io.Dir.openDirAbsolute(std.testing.io, app_path, .{});
+    defer app.close(std.testing.io);
+    const plist = try app.readFileAlloc(std.testing.io, "Contents/Info.plist", allocator, .limited(8192));
+    defer allocator.free(plist);
+    const launcher = try app.readFileAlloc(std.testing.io, "Contents/MacOS/Library Web Preview", allocator, .limited(4096));
+    defer allocator.free(launcher);
+    try std.testing.expect(std.mem.indexOf(u8, plist, "com.bernard.library.web-preview") != null);
+    try std.testing.expect(std.mem.indexOf(u8, launcher, launcher_path) != null);
 }

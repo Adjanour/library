@@ -18,18 +18,22 @@ jobs:
             target: x86_64-linux-gnu
             source: library-setup
             output: library-setup-linux-x86_64
+            package: linux
           - name: Windows x86_64
             target: x86_64-windows-gnu
             source: library-setup.exe
             output: library-setup-windows-x86_64.exe
+            package: windows
           - name: macOS x86_64
             target: x86_64-macos
             source: library-setup
             output: library-setup-macos-x86_64
+            package: macos-x86_64
           - name: macOS Apple Silicon
             target: aarch64-macos
             source: library-setup
             output: library-setup-macos-aarch64
+            package: macos-aarch64
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +51,31 @@ jobs:
           cp "installer/zig-out/bin/${{ matrix.source }}" "publish/${{ matrix.output }}"
           chmod +x "publish/${{ matrix.output }}"
           (cd publish && sha256sum "${{ matrix.output }}" > "${{ matrix.output }}.sha256")
+
+      - name: Package Finder and file-manager friendly setup
+        env:
+          PACKAGE_KIND: ${{ matrix.package }}
+          RAW_INSTALLER: ${{ matrix.output }}
+        run: |
+          case "$PACKAGE_KIND" in
+            linux)
+              mkdir -p "$RUNNER_TEMP/library-web-preview-setup"
+              cp "publish/$RAW_INSTALLER" "$RUNNER_TEMP/library-web-preview-setup/install-library-web-preview"
+              chmod +x "$RUNNER_TEMP/library-web-preview-setup/install-library-web-preview"
+              tar -C "$RUNNER_TEMP" -czf publish/library-web-setup-linux-x86_64.tar.gz library-web-preview-setup
+              (cd publish && sha256sum library-web-setup-linux-x86_64.tar.gz > library-web-setup-linux-x86_64.tar.gz.sha256)
+              ;;
+            macos-*)
+              mkdir -p "$RUNNER_TEMP/Library Web Preview Setup"
+              cp installer/package/macos/Install\ Library\ Web\ Preview.command "$RUNNER_TEMP/Library Web Preview Setup/Install Library Web Preview.command"
+              cp "publish/$RAW_INSTALLER" "$RUNNER_TEMP/Library Web Preview Setup/.library-setup"
+              chmod +x "$RUNNER_TEMP/Library Web Preview Setup/Install Library Web Preview.command" "$RUNNER_TEMP/Library Web Preview Setup/.library-setup"
+              (cd "$RUNNER_TEMP" && zip -Xqr "$GITHUB_WORKSPACE/publish/library-web-setup-$PACKAGE_KIND.zip" "Library Web Preview Setup")
+              (cd publish && sha256sum "library-web-setup-$PACKAGE_KIND.zip" > "library-web-setup-$PACKAGE_KIND.zip.sha256")
+              ;;
+            windows)
+              ;;
+          esac
 
       - uses: actions/upload-artifact@v4
         with:

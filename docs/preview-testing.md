@@ -13,20 +13,19 @@ For the local Web Preview, download the small setup program matching the test
 machine:
 
 - `library-setup-windows-x86_64.exe`
-- `library-setup-macos-aarch64` for Apple Silicon
-- `library-setup-macos-x86_64` for Intel Macs
-- `library-setup-linux-x86_64`
+- `library-web-setup-macos-aarch64.zip` for Apple Silicon
+- `library-web-setup-macos-x86_64.zip` for Intel Macs
+- `library-web-setup-linux-x86_64.tar.gz`
 
 Run the setup program without arguments. It downloads and verifies Library and
 its private Deno runtime, installs below the current user's application-data
-directory, opens the browser, and requires no administrator access. Linux can
-be started from a terminal with:
+directory, creates a reusable platform launcher, opens the browser, and
+requires no administrator access. Linux can be started from a terminal with:
 
 ```bash
-curl -L -o library-setup-linux-x86_64 \
-  https://github.com/Adjanour/library/releases/download/v0.1.1-preview.1/library-setup-linux-x86_64
-chmod +x library-setup-linux-x86_64
-./library-setup-linux-x86_64
+curl -LO https://github.com/Adjanour/library/releases/download/v0.1.1-preview.1/library-web-setup-linux-x86_64.tar.gz
+tar -xzf library-web-setup-linux-x86_64.tar.gz
+./library-web-preview-setup/install-library-web-preview
 ```
 
 Windows and macOS setup binaries are not signed or notarized yet. Treat them

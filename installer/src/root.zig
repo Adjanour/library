@@ -100,3 +100,7 @@ test "trusted manifest signatures reject a substituted key" {
         verify.verifyManifestSignatureTrusted(fixture, &signature_hex, &substituted_key_hex, &trusted_key_hex),
     );
 }
+
+test {
+    std.testing.refAllDecls(web_install);
+}

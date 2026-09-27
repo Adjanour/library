@@ -26,12 +26,14 @@ installer:
 5. extracts both payloads without calling a system archive utility
 6. caches the dependencies locked by `deno.lock`
 7. writes atomic current-version pointers and a reusable launcher
-8. starts Library and opens the browser
+8. creates a user-owned macOS app or Linux application-menu entry
+9. starts Library and opens the browser
 
 Use `web-preview --no-launch` to install without starting the server. The
 platform defaults are `%LOCALAPPDATA%\Library Preview` on Windows,
 `~/Library/Application Support/Library Preview` on macOS, and
 `$XDG_DATA_HOME/library-preview` or `~/.local/share/library-preview` on Linux.
+Use `--no-shortcuts` to suppress platform launcher integration.
 
 ## Build and test
 
@@ -89,7 +91,9 @@ Rollback swaps `current.txt` and `previous.txt` after confirming the target vers
 ## Current limitations
 
 The Web Preview setup path is published for Linux x86_64, Windows x86_64,
-Intel macOS, and Apple Silicon macOS. The Windows and macOS binaries remain
-experimental until code signing, notarization, installer metadata, and native
-device testing are complete. Desktop shortcuts, file associations, automatic
-updates, Readest, and Sioyek installation remain follow-up work.
+Intel macOS, and Apple Silicon macOS. Linux receives a user application-menu
+entry and macOS receives a user-owned app in `~/Applications`. The Windows and
+macOS binaries remain experimental until code signing, notarization, installer
+metadata, and native-device testing are complete. Windows Start Menu support,
+file associations, automatic updates, Readest, and Sioyek installation remain
+follow-up work.

@@ -83,7 +83,7 @@ fn printHelp(io: std.Io) !void {
     try writer.interface.writeAll(
         "Library Setup\n\n" ++
             "Usage:\n" ++
-            "  library-setup web-preview [--root <absolute-directory>] [--manifest-url <https-url>] [--no-launch]\n" ++
+            "  library-setup web-preview [--root <absolute-directory>] [--manifest-url <https-url>] [--no-launch] [--no-shortcuts]\n" ++
             "  library-setup plan [--with-readest] [--with-sioyek]\n" ++
             "  library-setup verify-file <path> <sha256>\n" ++
             "  library-setup install <signed-manifest> --root <absolute-directory> [--ca-cert <absolute-pem>] [--allow-http]\n" ++
@@ -117,6 +117,7 @@ fn installWeb(init: std.process.Init, args: *std.process.Args.Iterator) !void {
         .root = install_root,
         .allow_insecure_http = allow_http,
         .environ_map = init.environ_map,
+        .create_shortcuts = false,
     });
     result.deinit(init.gpa);
 }
@@ -126,6 +127,7 @@ fn installWebPreview(init: std.process.Init, args: *std.process.Args.Iterator) !
     var root: ?[]const u8 = null;
     var manifest_url: []const u8 = web_preview_manifest_url;
     var launch = true;
+    var create_shortcuts = true;
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--root")) {
             root = args.next() orelse return error.MissingInstallRoot;
@@ -133,6 +135,8 @@ fn installWebPreview(init: std.process.Init, args: *std.process.Args.Iterator) !
             manifest_url = args.next() orelse return error.MissingManifestUrl;
         } else if (std.mem.eql(u8, arg, "--no-launch")) {
             launch = false;
+        } else if (std.mem.eql(u8, arg, "--no-shortcuts")) {
+            create_shortcuts = false;
         } else return error.UnknownInstallOption;
     }
 
@@ -164,6 +168,7 @@ fn installWebPreview(init: std.process.Init, args: *std.process.Args.Iterator) !
     const result = try installer.web_install.install(init.io, init.gpa, &parsed.value, target, .{
         .root = install_root,
         .environ_map = init.environ_map,
+        .create_shortcuts = create_shortcuts,
     });
     defer result.deinit(init.gpa);
 
@@ -172,6 +177,10 @@ fn installWebPreview(init: std.process.Init, args: *std.process.Args.Iterator) !
         .{result.launcher_path},
     );
     try output.interface.flush();
+    if (result.shortcut_path) |shortcut_path| {
+        try output.interface.print("Platform launcher:\n  {s}\n\n", .{shortcut_path});
+        try output.interface.flush();
+    }
     if (launch) {
         try output.interface.writeAll("Starting Library at http://localhost:8080. Close this window to stop it.\n");
         try output.interface.flush();
