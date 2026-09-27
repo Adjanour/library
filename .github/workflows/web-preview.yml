@@ -43,13 +43,17 @@ jobs:
           cp -R deno/src dist/library-web-preview/deno/src
           cp -R web/static dist/library-web-preview/web/static
           cp scripts/start-web-preview.sh dist/library-web-preview/start-web-preview.sh
+          cp scripts/start-web-preview.ps1 dist/library-web-preview/start-web-preview.ps1
+          cp scripts/start-web-preview.cmd dist/library-web-preview/start-web-preview.cmd
           cp docs/web-preview.md dist/library-web-preview/README.md
           chmod +x dist/library-web-preview/start-web-preview.sh
 
       - name: Archive preview bundle
         run: |
           tar -C dist -czf dist/library-web-preview.tar.gz library-web-preview
+          (cd dist && zip -qr library-web-preview.zip library-web-preview)
           sha256sum dist/library-web-preview.tar.gz > dist/library-web-preview.tar.gz.sha256
+          sha256sum dist/library-web-preview.zip > dist/library-web-preview.zip.sha256
 
       - uses: actions/upload-artifact@v4
         with:
@@ -57,3 +61,5 @@ jobs:
           path: |
             dist/library-web-preview.tar.gz
             dist/library-web-preview.tar.gz.sha256
+            dist/library-web-preview.zip
+            dist/library-web-preview.zip.sha256

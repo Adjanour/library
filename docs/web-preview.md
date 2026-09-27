@@ -14,7 +14,11 @@ No account, hosted database, or administrator access is required.
 
 ## Run the release bundle
 
-Download `library-web-preview.tar.gz` from the Library preview release, then:
+Download the archive for your platform from the [Library preview release](https://github.com/Adjanour/library/releases/tag/v0.1.1-preview.1).
+
+### Linux and macOS
+
+Download `library-web-preview.tar.gz`, then:
 
 ```bash
 tar -xzf library-web-preview.tar.gz
@@ -30,6 +34,40 @@ Open <http://localhost:8080>. To use another port:
 
 The first run may download Deno module dependencies. The launcher does not
 install system packages or require `sudo`.
+
+### Windows PowerShell
+
+Download `library-web-preview.zip` and extract it in File Explorer or with
+PowerShell:
+
+```powershell
+Expand-Archive .\library-web-preview.zip -DestinationPath .
+Set-Location .\library-web-preview
+.\start-web-preview.ps1
+```
+
+If PowerShell blocks local scripts, run this once for the current PowerShell
+window, then start the preview again:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+```
+
+Use another port with `.\start-web-preview.ps1 9090`.
+
+### Windows Command Prompt
+
+Extract `library-web-preview.zip`, open Command Prompt in the extracted
+folder, and run:
+
+```bat
+start-web-preview.cmd
+```
+
+Use another port with `start-web-preview.cmd 9090`.
+
+The Windows launchers use Deno already installed for the current user. They do
+not install system packages or require administrator access.
 
 ## Choose library folders
 
