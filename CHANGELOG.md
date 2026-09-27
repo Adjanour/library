@@ -2,6 +2,21 @@
 
 All notable changes to Library are documented here.
 
+## Unreleased
+
+### Added
+
+- A calm, keyboard-accessible settings panel for configuring persistent library scan folders.
+- Platform-aware application data/cache paths and external-file launchers for Linux, macOS, and Windows.
+- EPUB rendition fallback across `write`, `srcdoc`, and blob URL iframe strategies.
+
+### Fixed
+
+- All-caps research-paper titles are no longer rejected as corrupt metadata.
+- Scanner tests no longer depend on files in one developer's home directory; the full Go suite now passes everywhere.
+- Full-text search now treats punctuation-heavy titles as text instead of FTS query syntax.
+- Svelte validation is clean with zero errors and zero warnings.
+
 ## [0.1.1] - 2026-09-26
 
 ### Fixed

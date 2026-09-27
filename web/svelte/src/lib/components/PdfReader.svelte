@@ -41,6 +41,29 @@
     let progressTimer: ReturnType<typeof setTimeout> | null = null;
     let searchDebounce: ReturnType<typeof setTimeout> | null = null;
 
+    function createRangeTransport(BaseTransport: any, fileUrl: string, length: number, initialData: Uint8Array) {
+        const Transport = class extends BaseTransport {
+            _tUrl = fileUrl;
+            _tCtrl = new AbortController();
+            constructor() {
+                super(length, initialData);
+            }
+            async requestDataRange(begin: number, end: number) {
+                const res = await fetch(this._tUrl, {
+                    headers: { Range: `bytes=${begin}-${end - 1}` },
+                    signal: this._tCtrl.signal,
+                });
+                if (res.status !== 206) throw new Error(`Range request failed: HTTP ${res.status}`);
+                this.onDataRange(begin, new Uint8Array(await res.arrayBuffer()));
+            }
+            abort() {
+                try { this._tCtrl.abort(); } catch {}
+                super.abort();
+            }
+        };
+        return new Transport();
+    }
+
     function queueProgressSync() {
         if (progressTimer) clearTimeout(progressTimer);
         progressTimer = setTimeout(() => {
@@ -267,33 +290,8 @@
                 const length = total ? parseInt(total[1], 10) : NaN;
                 if (first.status === 206 && Number.isFinite(length) && length > 0) {
                     const initialData = new Uint8Array(await first.arrayBuffer());
-                        class FetchRangeTransport extends pdfjs.PDFDataRangeTransport {
-                            _tUrl: string;
-                            _tCtrl: AbortController;
-                            constructor(len: number, init: Uint8Array) {
-                                super(len, init);
-                                this._tUrl = fileUrl;
-                                this._tCtrl = new AbortController();
-                            }
-                            async requestDataRange(begin: number, end: number) {
-                                const res = await fetch(this._tUrl, {
-                                    headers: { Range: `bytes=${begin}-${end - 1}` },
-                                    signal: this._tCtrl.signal,
-                                });
-                                if (res.status !== 206) {
-                                    throw new Error(`Range request failed: HTTP ${res.status}`);
-                                }
-                                this.onDataRange(begin, new Uint8Array(await res.arrayBuffer()));
-                            }
-                            abort() {
-                                try {
-                                    this._tCtrl.abort();
-                                } catch {}
-                                super.abort();
-                            }
-                        }
-                        transport = new FetchRangeTransport(length, initialData);
-                    }
+                    transport = createRangeTransport(pdfjs.PDFDataRangeTransport, fileUrl, length, initialData);
+                }
             } catch {
                 transport = null;
             }
@@ -495,7 +493,7 @@
        hundreds of page containers up front; without this the browser lays
        out and paints all of them before first paint. pdf.js sets explicit
        page sizes, so no intrinsic-size guess is needed. */
-    .pdfViewer .page {
+    :global(.pdfViewer .page) {
         content-visibility: auto;
     }
 </style>

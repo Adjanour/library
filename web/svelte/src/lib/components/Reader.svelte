@@ -3,6 +3,7 @@
     import { api } from "$lib/api";
     import PdfReader from "$lib/components/PdfReader.svelte";
     import { releaseEpub, warmEpub } from "$lib/epubCache";
+    import { openWithRenditionFallback, type EpubRenditionMethod } from "$lib/epubRendition";
 
     let {
         item,
@@ -15,7 +16,7 @@
     } = $props();
     let isPdf = $derived(item.filename.toLowerCase().endsWith(".pdf"));
 
-    let viewer: HTMLDivElement;
+    let viewer = $state<HTMLDivElement>();
     let rendition: any = null;
     let book: any = null;
     let ready = $state(false);
@@ -408,6 +409,7 @@
             sessionStarted = true;
         }).catch(() => {});
         if (!viewer) return;
+        const viewerElement = viewer;
         if (isPdf) {
             loading = false;
             return;
@@ -422,50 +424,11 @@
             await withTimeout(book.loaded.sections, 30000, "Loading EPUB spine");
             note("spine-ready");
 
-            rendition = book.renderTo(viewer, {
-                width: "100%",
-                height: "100%",
-                method: "srcdoc",
-                spread: settings.spread,
-                flow: settings.flow,
-            });
-
-            // Register themes (typography baked in — see themeBodyRules)
-            registerAllThemes();
-            rendition.themes.select(settings.theme);
-
             book.on("openFailed", (cause: unknown) => {
                 if (mounted) {
                     loading = false;
                     fail(cause instanceof Error ? cause.message : "Unable to open this EPUB archive.");
                 }
-            });
-            rendition.on("displayerror", (cause: unknown) => {
-                if (mounted) {
-                    loading = false;
-                    fail(cause instanceof Error ? cause.message : "Unable to render this EPUB.");
-                }
-            });
-            rendition.on("loaderror", (cause: unknown) => {
-                if (mounted) {
-                    loading = false;
-                    fail(cause instanceof Error ? cause.message : "Unable to load this EPUB section.");
-                }
-            });
-
-            rendition.on("relocated", (location: any) => {
-                if (!mounted) return;
-                note("relocated");
-                if (location?.percentage) {
-                    currentPercent = Math.round(location.percentage * 100);
-                }
-                currentCfi = location?.start?.cfi || "";
-                currentChapter = location?.start?.href?.split("#")[0]?.split("/").pop()?.replace(/\.(xhtml|html?)$/i, "") || "";
-                maybeFinishReading();
-                queueProgressSync();
-            });
-            rendition.on("rendered", () => {
-                if (mounted) note("rendered");
             });
             // Stage markers inside the library's own pipeline: section hooks
             // fire during Section.load/render, rendition hooks after the
@@ -479,12 +442,6 @@
                     note("serialize");
                 });
             } catch {}
-            try {
-                rendition.hooks.content.register(() => {
-                    note("rendition-content");
-                });
-            } catch {}
-
             loadingStage = "Loading first chapter…";
             const firstSection = book.sections.get(0);
             if (!firstSection) throw new Error("This EPUB has no readable chapters.");
@@ -492,30 +449,55 @@
             try { rawSaved = localStorage.getItem(`library:epub-position:${item.id}`) || ""; } catch {}
             // Only well-formed CFIs are worth attempting; anything else goes
             // straight to the first page instead of erroring or hanging.
-            const savedPosition = rawSaved.indexOf("epubcfi(") === 0 ? rawSaved : "";
-            if (savedPosition) {
-                loadingStage = "Restoring position…";
-                try {
-                    await withTimeout(
-                        rendition.display(savedPosition),
-                        15000,
-                        `Restoring position (saved: ${savedPosition.slice(0, 100)})`,
-                    );
-                    note("restored");
-                } catch {
-                    // Drop the stale position FIRST: the failed display task
-                    // can leave the rendition queue stuck, so a retry in the
-                    // same session must never attempt it again.
-                    try { localStorage.removeItem(`library:epub-position:${item.id}`); } catch {}
-                    loadingStage = "Opening first page…";
-                    await withTimeout(rendition.display(0), 20000, "Opening first page");
-                    note("first-page-after-fallback");
-                }
-            } else {
-                loadingStage = "Opening first page…";
-                await withTimeout(rendition.display(0), 20000, "Opening first page");
-                note("first-page");
-            }
+            let savedPosition = rawSaved.indexOf("epubcfi(") === 0 ? rawSaved : "";
+            const opened = await openWithRenditionFallback({
+                timeoutMs: 6000,
+                create: (method: EpubRenditionMethod) => {
+                    viewerElement.replaceChildren();
+                    const candidate = book.renderTo(viewerElement, {
+                        width: "100%",
+                        height: "100%",
+                        method,
+                        spread: settings.spread,
+                        flow: settings.flow,
+                    });
+                    rendition = candidate;
+                    registerAllThemes();
+                    candidate.themes.select(settings.theme);
+                    candidate.on("relocated", (location: any) => {
+                        if (!mounted || rendition !== candidate) return;
+                        note("relocated");
+                        if (location?.percentage) currentPercent = Math.round(location.percentage * 100);
+                        currentCfi = location?.start?.cfi || "";
+                        currentChapter = location?.start?.href?.split("#")[0]?.split("/").pop()?.replace(/\.(xhtml|html?)$/i, "") || "";
+                        maybeFinishReading();
+                        queueProgressSync();
+                    });
+                    candidate.on("rendered", () => {
+                        if (mounted && rendition === candidate) note("rendered");
+                    });
+                    try { candidate.hooks.content.register(() => note("rendition-content")); } catch {}
+                    return candidate;
+                },
+                display: async (candidate, method) => {
+                    loadingStage = savedPosition ? "Restoring position…" : "Opening first page…";
+                    try {
+                        await candidate.display(savedPosition || 0);
+                    } catch (error) {
+                        if (savedPosition) {
+                            savedPosition = "";
+                            try { localStorage.removeItem(`library:epub-position:${item.id}`); } catch {}
+                        }
+                        throw error;
+                    }
+                    note(`opened:${method}`);
+                },
+                dispose: (candidate) => {
+                    try { candidate.destroy(); } catch {}
+                    if (rendition === candidate) rendition = null;
+                },
+            });
+            rendition = opened.rendition;
             // NOTE: this @intity/epub-js fork has no book.ready promise
             // (the original epubjs does) — navigation is awaited explicitly.
             book.loaded.navigation.then(() => {

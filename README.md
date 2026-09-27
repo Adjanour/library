@@ -1,12 +1,14 @@
 # Library
 
-A personal knowledge base for tracking books, papers, and reading progress. Scans your local Documents, Downloads, and Books directories, indexes metadata, and gives you a web UI to browse and manage everything.
+A local-first desktop library for books, papers, and reading progress. It indexes folders you choose, extracts metadata, and provides fast in-app EPUB and PDF readers.
 
 Integrates with [FocusD](https://github.com/Adjanour/focusd) to pull reading plans and sync completion status.
 
 ## Features
 
 - **Auto-indexing** — scans local directories for PDFs, EPUBs, and other book formats, extracting title, author, tags, and categories
+- **Configurable folders** — add or remove watched folders from Settings; choices persist on the device
+- **In-app reading** — EPUB and range-streamed PDF readers with durable progress and bookmarks
 - **Reading tracking** — start/stop reading sessions, log pages read, track progress per book
 - **FocusD sync** — pulls your reading queue from FocusD, marks tasks done when you finish a book
 - **Search** — instant full-text search with filters by type, category, tag, and year
@@ -46,6 +48,25 @@ make build-server   # Go server only
 make build-tui      # terminal UI only
 make build-web      # SvelteKit frontend only
 ```
+
+### Desktop app
+
+The current desktop flow uses Deno Desktop and the Svelte production build:
+
+```bash
+cd web/svelte
+pnpm install --frozen-lockfile
+pnpm run build
+
+cd ../../deno
+deno task check
+deno task test
+deno task desktop
+```
+
+Linux is the currently verified release target. The runtime now uses platform-correct data paths and file launchers on macOS and Windows, and Deno Desktop can produce those targets, but signed/notarized installers still need CI builds and real-device verification before those platforms are advertised as supported.
+
+Metadata extraction currently uses Poppler tools (`pdfinfo`, `pdftotext`) and `unzip` when available. Missing tools degrade to filename metadata rather than preventing the library or in-app readers from working.
 
 ## Commands
 
@@ -100,7 +121,11 @@ web/
 
 ## Data
 
-The SQLite database lives at `~/.local/share/library/library.db`.
+The SQLite database follows each platform's application-data convention:
+
+- Linux: `$XDG_DATA_HOME/library/library.db` or `~/.local/share/library/library.db`
+- macOS: `~/Library/Application Support/library/library.db`
+- Windows: `%LOCALAPPDATA%\library\library.db`
 
 ## License
 

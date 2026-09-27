@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { api, type Item, type Stats, type CategoryCount, type TagCount, type ReadingDashboard, type ReadingProgress, type ReadingSession, type ReadingQueueItem } from '$lib/api';
+  import { api, type AppSettings, type Item, type Stats, type CategoryCount, type TagCount, type ReadingDashboard, type ReadingProgress, type ReadingSession, type ReadingQueueItem } from '$lib/api';
   import Sidebar from '$lib/components/Sidebar.svelte';
   import Toolbar from '$lib/components/Toolbar.svelte';
   import BookCard from '$lib/components/BookCard.svelte';
@@ -9,6 +9,7 @@
   import Reader from '$lib/components/Reader.svelte';
   import Modals from '$lib/components/Modals.svelte';
   import CommandPalette from '$lib/components/CommandPalette.svelte';
+  import SettingsPanel from '$lib/components/SettingsPanel.svelte';
 
   let query = $state(''), activeType = $state(''), activeCategory = $state('');
   let activeTag = $state(''), activePurpose = $state(''), sortBy = $state('');
@@ -25,6 +26,8 @@
   let selectedSessions = $state<ReadingSession[]>([]);
   let showDeleteModal = $state(false), showKeybindings = $state(false);
   let showCommandPalette = $state(false);
+  let showSettings = $state(false);
+  let appSettings = $state<AppSettings | null>(null);
   let readingItem = $state<Item | null>(null);
   let draggedQueueId = $state<number | null>(null);
   let queueDropId = $state<number | null>(null);
@@ -139,6 +142,14 @@
   async function rescan() { loading = true;
     try { await api.scan(); await Promise.all([search(), loadSidebarData()]); } catch (e) { console.error(e); } loading = false; }
   async function onSaved(u: Item) { selectedItem = u; items = items.map((i) => (i.id === u.id ? u : i)); await loadSidebarData(); }
+  async function openSettings() {
+    try { appSettings = await api.settings(); showSettings = true; } catch (e) { console.error(e); }
+  }
+  async function saveSettings(scanDirectories: string[]) {
+    appSettings = await api.updateSettings({ scan_directories: scanDirectories });
+    showSettings = false;
+    await rescan();
+  }
   async function deleteItem() { if (!selectedItem) return;
     try { await api.delete(selectedItem.id); selectedItem = null; showDeleteModal = false; search(); loadSidebarData(); } catch (e) { console.error(e); } }
   async function quitApp() {
@@ -152,7 +163,7 @@
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); showCommandPalette = true; return; }
     if (e.key === '/' && !isInput) { e.preventDefault(); document.getElementById('search-input')?.focus(); return; }
     if (e.key === 'Escape') {
-      if (showCommandPalette) showCommandPalette = false; else if (readingItem) readingItem = null; else if (showDeleteModal) showDeleteModal = false;
+      if (showSettings) showSettings = false; else if (showCommandPalette) showCommandPalette = false; else if (readingItem) readingItem = null; else if (showDeleteModal) showDeleteModal = false;
       else if (showKeybindings) showKeybindings = false; else if (selectedItem) selectedItem = null;
       else (document.activeElement as HTMLElement)?.blur(); return;
     }
@@ -181,6 +192,7 @@
     { id: 'preview', label: 'Toggle preview panel', hint: 'Show or hide book details', shortcut: 'p', run: togglePreviewPanel },
     { id: 'clear', label: 'Clear search and filters', hint: 'Return to the full library', run: clearFilters },
     { id: 'rescan', label: 'Rescan library', hint: 'Refresh files and metadata', shortcut: 'R', run: rescan },
+    { id: 'settings', label: 'Open settings', hint: 'Choose library folders and review reader defaults', run: openSettings },
     { id: 'theme', label: 'Toggle theme', hint: 'Switch between light and dark', run: toggleTheme },
   ]);
   $effect(() => { document.documentElement.setAttribute('data-theme', theme); });
@@ -200,7 +212,7 @@
     <Toolbar {query} {view} {theme} {loading} {showPreviewPanel}
       onQueryInput={handleQueryInput} onSearch={handleSearch}
       onViewChange={(v) => { view = v; if (v === 'reading') loadDashboard(); }}
-      onToggleTheme={toggleTheme} onRescan={rescan} onShowCommands={() => (showCommandPalette = true)} onShowKeybindings={() => (showKeybindings = true)}
+      onToggleTheme={toggleTheme} onRescan={rescan} onShowCommands={() => (showCommandPalette = true)} onShowKeybindings={() => (showKeybindings = true)} onShowSettings={openSettings}
       onTogglePreview={togglePreviewPanel} onQuit={quitApp} />
     <div class="px-3 py-1.5 border-b border-border flex items-center gap-2">
       <select bind:value={sortBy} onchange={() => { page = 1; search(); }} class="bg-surface-2 border border-border rounded px-2 py-1 text-xs text-text-secondary cursor-pointer">
@@ -355,3 +367,4 @@
 <Modals showDelete={showDeleteModal} showKeybindings={showKeybindings} itemTitle={selectedItem?.title || ''}
   onConfirmDelete={deleteItem} onCancelDelete={() => (showDeleteModal = false)} onCloseKeybindings={() => (showKeybindings = false)} />
 {#if showCommandPalette}<CommandPalette commands={commands} onClose={() => (showCommandPalette = false)} />{/if}
+{#if showSettings && appSettings}<SettingsPanel settings={appSettings} onClose={() => (showSettings = false)} onSave={saveSettings} />{/if}

@@ -6,29 +6,40 @@ import { match } from "./result.ts";
 import type { Result } from "./result.ts";
 import { AppError } from "./result.ts";
 import {
+  IdParamSchema,
   ItemUpdateSchema,
   SearchQuerySchema,
-  IdParamSchema,
+  SettingsSchema,
 } from "./validate.ts";
-import { dirname, join, fromFileUrl } from "@std/path";
+import { dirname, fromFileUrl, isAbsolute, join, normalize } from "@std/path";
+import { appCacheRoot, defaultScanDirectories } from "./platform.ts";
 
 const app = new Hono();
 const db = new DB();
+const APP_VERSION = "0.2.0-dev";
 
-const homeDir = Deno.env.get("HOME") ?? ".";
-const DEFAULT_SCAN_DIRS = [
-  `${homeDir}/Documents`,
-  `${homeDir}/Downloads`,
-  `${homeDir}/Books`,
-];
+const DEFAULT_SCAN_DIRS = defaultScanDirectories();
+
+function configuredScanDirectories(): string[] {
+  const raw = db.getSetting("scan_directories");
+  if (!raw) return DEFAULT_SCAN_DIRS;
+  try {
+    const value = JSON.parse(raw);
+    return Array.isArray(value) && value.length > 0 ? value : DEFAULT_SCAN_DIRS;
+  } catch {
+    return DEFAULT_SCAN_DIRS;
+  }
+}
 
 function respond<T>(result: Result<T>): Response {
   return match(result, {
-    ok: (data) => data === undefined ? Response.json({ ok: true }) : Response.json(data),
-    err: (e) => Response.json(
-      { error: e.message },
-      { status: e.code === "NOT_FOUND" ? 404 : 500 }
-    ),
+    ok: (data) =>
+      data === undefined ? Response.json({ ok: true }) : Response.json(data),
+    err: (e) =>
+      Response.json(
+        { error: e.message },
+        { status: e.code === "NOT_FOUND" ? 404 : 500 },
+      ),
   });
 }
 
@@ -41,7 +52,7 @@ function parseId(param: string): Result<number> {
 }
 
 app.get("/api/health", (c) => {
-  return c.json({ status: "ok", fts: db.fts, version: "1.0.0" });
+  return c.json({ status: "ok", fts: db.fts, version: APP_VERSION });
 });
 
 app.get("/api/search", (c) => {
@@ -67,6 +78,50 @@ app.get("/api/stats", () => respond(db.getStats()));
 app.get("/api/categories", () => respond(db.getCategories()));
 app.get("/api/tags", () => respond(db.getTags()));
 app.get("/api/purposes", () => respond(db.getPurposes()));
+
+app.get("/api/settings", () =>
+  Response.json({
+    scan_directories: configuredScanDirectories(),
+    platform: Deno.build.os,
+    version: APP_VERSION,
+  }));
+
+app.put("/api/settings", async (c) => {
+  const parsed = SettingsSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return Response.json({ error: parsed.error.message }, { status: 400 });
+  }
+  const directories = [
+    ...new Set(
+      parsed.data.scan_directories.map((path) => normalize(path.trim())),
+    ),
+  ];
+  for (const path of directories) {
+    if (!isAbsolute(path)) {
+      return Response.json({
+        error: `Scan folders must be absolute paths: ${path}`,
+      }, { status: 400 });
+    }
+    try {
+      const info = await Deno.stat(path);
+      if (!info.isDirectory) {
+        return Response.json({ error: `Not a folder: ${path}` }, {
+          status: 400,
+        });
+      }
+    } catch {
+      return Response.json({
+        error: `Folder does not exist or cannot be read: ${path}`,
+      }, { status: 400 });
+    }
+  }
+  db.setSetting("scan_directories", JSON.stringify(directories));
+  return Response.json({
+    scan_directories: directories,
+    platform: Deno.build.os,
+    version: APP_VERSION,
+  });
+});
 
 app.get("/api/items/:id", (c) => {
   const id = parseId(c.req.param("id"));
@@ -114,7 +169,9 @@ async function fileMetaHeaders(path: string, filename: string, total: number) {
     "content-type": mimeTypes[ext] ?? "application/octet-stream",
     "accept-ranges": "bytes",
     "etag": `"${total}-${mtime}"`,
-    "last-modified": mtime ? new Date(mtime).toUTCString() : new Date(0).toUTCString(),
+    "last-modified": mtime
+      ? new Date(mtime).toUTCString()
+      : new Date(0).toUTCString(),
   };
 }
 
@@ -127,7 +184,11 @@ async function fileHead(c: any) {
   if (!item.ok) return Response.json({ error: "not found" }, { status: 404 });
   try {
     const stat = await Deno.stat(item.value.path);
-    const headers = await fileMetaHeaders(item.value.path, item.value.filename, stat.size);
+    const headers = await fileMetaHeaders(
+      item.value.path,
+      item.value.filename,
+      stat.size,
+    );
     return new Response(null, {
       headers: { ...headers, "content-length": String(stat.size) },
     });
@@ -145,7 +206,11 @@ app.get("/api/file/:id", async (c) => {
   try {
     const stat = await Deno.stat(item.value.path);
     const total = stat.size;
-    const meta = await fileMetaHeaders(item.value.path, item.value.filename, total);
+    const meta = await fileMetaHeaders(
+      item.value.path,
+      item.value.filename,
+      total,
+    );
     const contentType = meta["content-type"];
     const range = c.req.header("range");
     if (range) {
@@ -221,7 +286,17 @@ app.get("/api/reading/progress/:id", (c) => {
   if (!id.ok) return respond(id);
   const progress = db.getReadingProgress(id.value);
   if (!progress) {
-    return Response.json({ item_id: id.value, status: "unread", progress_percent: 0, current_page: 0, total_pages: 0, started_at: null, finished_at: null, last_read_at: null, updated_at: new Date().toISOString() });
+    return Response.json({
+      item_id: id.value,
+      status: "unread",
+      progress_percent: 0,
+      current_page: 0,
+      total_pages: 0,
+      started_at: null,
+      finished_at: null,
+      last_read_at: null,
+      updated_at: new Date().toISOString(),
+    });
   }
   return Response.json(progress);
 });
@@ -245,7 +320,9 @@ app.post("/api/reading/stop/:id", async (c) => {
   const id = parseId(c.req.param("id"));
   if (!id.ok) return respond(id);
   const session = db.getActiveSession(id.value);
-  if (!session) return Response.json({ error: "no active session" }, { status: 404 });
+  if (!session) {
+    return Response.json({ error: "no active session" }, { status: 404 });
+  }
   const body = await c.req.json().catch(() => ({ pages_read: 0 }));
   db.stopReadingSession(session.id, body.pages_read ?? 0);
   return Response.json({ status: "stopped" });
@@ -294,7 +371,9 @@ app.post("/api/reading/finish/:id", (c) => {
 // Stub endpoints (Phase 5 integrations - not yet implemented)
 
 app.post("/api/reading/sync-focusd", () => {
-  return Response.json({ error: "FocusD integration not implemented" }, { status: 501 });
+  return Response.json({ error: "FocusD integration not implemented" }, {
+    status: 501,
+  });
 });
 
 app.get("/api/reading/readest-status", () => {
@@ -302,7 +381,9 @@ app.get("/api/reading/readest-status", () => {
 });
 
 app.post("/api/reading/sync-readest", () => {
-  return Response.json({ error: "Readest integration not implemented" }, { status: 501 });
+  return Response.json({ error: "Readest integration not implemented" }, {
+    status: 501,
+  });
 });
 
 app.post("/api/quit", () => {
@@ -319,7 +400,7 @@ app.post("/api/quit", () => {
 });
 
 app.post("/api/scan", async (c) => {
-  let dirs = DEFAULT_SCAN_DIRS;
+  let dirs = configuredScanDirectories();
   let force = false;
   try {
     const body = await c.req.json();
@@ -333,17 +414,25 @@ app.post("/api/scan", async (c) => {
     total = t;
   }, force);
   return match(result, {
-    ok: ({ indexed, removed, moved }) => Response.json({ indexed, removed, moved, total }),
-    err: (e) => Response.json(
-      { error: e.message },
-      { status: e.code === "NOT_FOUND" ? 404 : 500 }
-    ),
+    ok: ({ indexed, removed, moved }) =>
+      Response.json({ indexed, removed, moved, total }),
+    err: (e) =>
+      Response.json(
+        { error: e.message },
+        { status: e.code === "NOT_FOUND" ? 404 : 500 },
+      ),
   });
 });
 
 // Static file serving for frontend
 
-const staticDir = join(dirname(fromFileUrl(import.meta.url)), "..", "..", "web", "static");
+const staticDir = join(
+  dirname(fromFileUrl(import.meta.url)),
+  "..",
+  "..",
+  "web",
+  "static",
+);
 
 app.get("/*", async (c) => {
   const path = c.req.path;
@@ -386,8 +475,7 @@ app.get("/*", async (c) => {
 // pile up — each running the code from when it was launched, which makes
 // "relaunch to get the fix" silently open the old build. A new instance
 // therefore terminates any predecessor before serving.
-const home = Deno.env.get("HOME") ?? ".";
-const pidDir = join(home, ".cache", "library");
+const pidDir = join(appCacheRoot(), "library");
 const pidFile = join(pidDir, "library.pid");
 try {
   await Deno.mkdir(pidDir, { recursive: true });
@@ -396,7 +484,9 @@ try {
     try {
       Deno.kill(prev, "SIGTERM");
       await new Promise((r) => setTimeout(r, 1000));
-      try { Deno.kill(prev, "SIGKILL"); } catch { /* exited after TERM */ }
+      try {
+        Deno.kill(prev, "SIGKILL");
+      } catch { /* exited after TERM */ }
       console.log(`Terminated previous instance (pid ${prev})`);
     } catch { /* already gone */ }
   }

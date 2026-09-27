@@ -26,3 +26,7 @@ export const SearchQuerySchema = z.object({
 export const IdParamSchema = z.object({
   id: z.coerce.number().int().positive(),
 });
+
+export const SettingsSchema = z.object({
+  scan_directories: z.array(z.string().trim().min(1)).min(1).max(20),
+});

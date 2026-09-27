@@ -161,16 +161,6 @@ func isBadMetadata(s string) bool {
 	if len(cleaned) > 10 && special*100/len(cleaned) > 20 {
 		return true
 	}
-	// No lowercase letters at all → likely garbled shifted-font or all-caps junk
-	lower := 0
-	for _, c := range cleaned {
-		if c >= 'a' && c <= 'z' {
-			lower++
-		}
-	}
-	if len(cleaned) > 10 && lower == 0 {
-		return true
-	}
 	return false
 }
 
@@ -215,7 +205,10 @@ func extractTitleFromFirstPage(path string) string {
 	if err != nil {
 		return ""
 	}
-	text := string(out)
+	return extractTitleFromText(string(out))
+}
+
+func extractTitleFromText(text string) string {
 	lines := strings.Split(text, "\n")
 
 	arxivIdx := -1

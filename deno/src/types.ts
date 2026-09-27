@@ -73,6 +73,10 @@ export interface TagCount {
   count: number;
 }
 
+export interface AppSettings {
+  scan_directories: string[];
+}
+
 // Reading
 
 export type ReadingStatus = "unread" | "reading" | "finished" | "abandoned";
