@@ -23,8 +23,16 @@ chmod +x library-setup-linux-x86_64
 ```
 
 Windows and macOS builds currently run in CI but are not published as signed
-installers. Native testers should contact the project owner for the matching
-build, or help validate a local build using
+installers. The latest successful platform build is available from the
+[Desktop builds workflow run](https://github.com/Adjanour/library/actions/runs/36307933901).
+Open the run, scroll to **Artifacts**, and download the matching archive:
+
+- `library-windows-build` for Windows x86_64
+- `library-macos-build` for Apple Silicon macOS
+
+GitHub may ask testers to sign in before downloading workflow artifacts. These
+archives are temporary CI artifacts, not certified installers, and may expire.
+Native testers can also use a local build by following
 [`docs/getting-started.md`](getting-started.md).
 
 ## Test this first
