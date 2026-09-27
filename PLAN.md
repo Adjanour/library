@@ -44,6 +44,10 @@ The preview must not imply Windows/macOS signing, notarization, installer metada
 - Add Windows signing and macOS signing/notarization when credentials and runners are available.
 - Generate release artifacts, checksums, and a protected signed manifest.
 - Exercise upgrade and rollback from the previous preview.
+- Publish only the matching platform build to each tester; do not make every tester download all desktop bundles.
+- Measure and reduce desktop bundle size before broad release. Keep CEF and the reader assets required for reliable EPUB rendering.
+- Produce a file-level size report, remove unused packaged files, and compare compressed download size with installed size.
+- Keep a small user-owned bootstrapper as the preferred future distribution path, with the verified platform payload fetched separately.
 
 ### 3. Reader hardening
 
