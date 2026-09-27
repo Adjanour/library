@@ -1,4 +1,6 @@
-# Porting Plan: Go Backend → Deno/TypeScript + deno desktop
+# Archived: Porting Plan: Go Backend → Deno/TypeScript + deno desktop
+
+> This is historical planning material. The Deno/TypeScript desktop port is now the active architecture. Use [`PLAN.md`](../../PLAN.md), [`CONTRIBUTING.md`](../../CONTRIBUTING.md), and [`docs/desktop-packaging.md`](../desktop-packaging.md) for current guidance.
 
 ## Goal
 

@@ -16,7 +16,7 @@ import { dirname, fromFileUrl, isAbsolute, join, normalize } from "@std/path";
 import { appCacheRoot, defaultScanDirectories } from "./platform.ts";
 
 const app = new Hono();
-const db = new DB();
+const db = new DB(Deno.env.get("LIBRARY_DB_PATH") || undefined);
 const APP_VERSION = "0.1.1-dev";
 const epubDiagnostics: Array<Record<string, unknown>> = [];
 

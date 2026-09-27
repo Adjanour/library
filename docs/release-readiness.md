@@ -14,6 +14,7 @@ Linux is the verified release target. Windows and macOS are build-capable throug
 - Zig installer tests pass.
 - Installer download integration passes.
 - Linux packaged binary launches and answers `/api/health`.
+- Linux packaged EPUB fixture smoke test reaches a successful rendition event.
 - Windows and macOS native CI builds complete.
 
 ## Native platform gates

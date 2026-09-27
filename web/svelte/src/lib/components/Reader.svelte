@@ -47,7 +47,7 @@
     let loadingStage = $state("Opening book…");
     // Bumped on every reader change so a screenshot of the error text
     // identifies exactly which build produced it.
-    const READER_BUILD = "epub-trace-6";
+    const READER_BUILD = "epub-trace-7";
     // Milestones reached during open; appended to any error so a failure
     // can be localized (parse vs iframe-load vs layout) from a screenshot.
     let trace: string[] = [];
@@ -70,6 +70,26 @@
     function fail(message: string) {
         error = `${message} [trace: ${trace.join("→") || "none"}] [build ${READER_BUILD}]`;
         report("failure", { message, trace });
+    }
+
+    function renditionDomState(viewerElement: HTMLDivElement) {
+        const frames = [...viewerElement.querySelectorAll("iframe")];
+        return {
+            viewer_children: viewerElement.children.length,
+            iframe_count: frames.length,
+            frames: frames.map((frame) => {
+                try {
+                    return {
+                        src: frame.getAttribute("src") || "",
+                        srcdoc_length: frame.srcdoc?.length || 0,
+                        ready_state: frame.contentDocument?.readyState || "none",
+                        body_length: frame.contentDocument?.body?.textContent?.length || 0,
+                    };
+                } catch {
+                    return { src: frame.getAttribute("src") || "", access: "blocked" };
+                }
+            }),
+        };
     }
 
     // Load one minimal chapter through each iframe method the library
@@ -484,6 +504,17 @@
             let savedPosition = rawSaved.indexOf("epubcfi(") === 0 ? rawSaved : "";
             const opened = await openWithRenditionFallback({
                 timeoutMs: 6000,
+                onAttempt: ({ method, phase, elapsedMs, error: attemptError }) => {
+                    report("rendition-attempt", {
+                        method,
+                        phase,
+                        elapsed_ms: elapsedMs,
+                        ...(attemptError ? { attempt_error: attemptError } : {}),
+                        ...(phase === "timeout" || phase === "failure"
+                            ? renditionDomState(viewerElement)
+                            : {}),
+                    });
+                },
                 create: (method: EpubRenditionMethod) => {
                     viewerElement.replaceChildren();
                     const candidate = book.renderTo(viewerElement, {

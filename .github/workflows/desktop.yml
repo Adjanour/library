@@ -48,6 +48,8 @@ jobs:
         run: deno task desktop
       - name: Launch validation
         run: xvfb-run -a installer/scripts/validate-desktop-launch.sh dist/app/app
+      - name: EPUB reader smoke validation
+        run: xvfb-run -a installer/scripts/validate-desktop-epub.sh dist/app/app "$RUNNER_TEMP/library-smoke.db" "$RUNNER_TEMP/library-smoke.epub"
       - name: Archive Linux package
         run: tar -C dist -czf dist/library-linux.tar.gz app
       - uses: actions/upload-artifact@v4

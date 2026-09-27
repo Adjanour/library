@@ -1,4 +1,6 @@
-# Library - Development Guide
+# Archived: Library Development Guide
+
+> This guide describes the earlier Go-first application layout. It is retained for historical context. Current contributor workflows are documented in [`CONTRIBUTING.md`](../../CONTRIBUTING.md) and [`docs/getting-started.md`](../getting-started.md).
 
 ## Architecture
 

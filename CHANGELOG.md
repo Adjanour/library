@@ -11,6 +11,7 @@ All notable changes to Library are documented here.
 - Platform-aware application data/cache paths and external-file launchers for Linux, macOS, and Windows.
 - EPUB rendition fallback across `write`, `srcdoc`, and blob URL iframe strategies.
 - Local EPUB startup telemetry and an automated packaged-app smoke mode.
+- A generated EPUB fixture and Linux CEF smoke harness for testing the packaged reader.
 
 ### Fixed
 
@@ -20,6 +21,7 @@ All notable changes to Library are documented here.
 - The desktop bundle now uses CEF because Linux WebKitGTK did not complete EPUB chapter iframe loads; the exact failing EPUB opens in about 330 ms in the packaged engine.
 - Keyboard shortcuts no longer leak through readers or modal surfaces, and the shortcut reference matches implemented behavior.
 - Svelte validation is clean with zero errors and zero warnings.
+- Packaged EPUB failures now include per-method timing and iframe state diagnostics.
 
 ## [0.1.1] - 2026-09-26
 
@@ -60,4 +62,4 @@ All notable changes to Library are documented here.
 - Deno checks and tests pass: 37 tests.
 - Svelte check passes with no errors; production frontend build passes.
 - Go scanner year/title tests and database tests pass.
-- The full Go suite retains one known machine-local first-page fixture mismatch for `2602.02734v2.pdf`; it was not changed as part of this release.
+- The full Go suite passes without the previously reported machine-local first-page fixture mismatch.
