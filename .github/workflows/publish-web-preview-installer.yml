@@ -225,10 +225,12 @@ jobs:
           LIBRARY_INSTALLER_SIGNING_SEED: ${{ secrets.LIBRARY_INSTALLER_SIGNING_SEED }}
         run: |
           test -n "$LIBRARY_INSTALLER_SIGNING_SEED"
-          bash scripts/generate-preview-manifest.sh manifests/web-preview-0.1.1.json ../publish/library-preview-manifest.json "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.1.1-preview.1"
-          mise exec -- zig build run -- sign-manifest ../publish/library-preview-manifest.json ../publish/library-web-preview-manifest.signed
-          grep -q '^public_key=21dbc24320a3d009b8ab0a6854859d64c4a936b4033703cfe2edc105c95a682b$' ../publish/library-web-preview-manifest.signed
-          (cd ../publish && sha256sum library-web-preview-manifest.signed > library-web-preview-manifest.signed.sha256)
+          cd "$GITHUB_WORKSPACE/publish"
+          bash "$GITHUB_WORKSPACE/installer/scripts/generate-preview-manifest.sh" "$GITHUB_WORKSPACE/installer/manifests/web-preview-0.1.1.json" library-preview-manifest.json "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.1.1-preview.1"
+          cd "$GITHUB_WORKSPACE/installer"
+          mise exec -- zig build run -- sign-manifest "$GITHUB_WORKSPACE/publish/library-preview-manifest.json" "$GITHUB_WORKSPACE/publish/library-web-preview-manifest.signed"
+          grep -q '^public_key=21dbc24320a3d009b8ab0a6854859d64c4a936b4033703cfe2edc105c95a682b$' "$GITHUB_WORKSPACE/publish/library-web-preview-manifest.signed"
+          (cd "$GITHUB_WORKSPACE/publish" && sha256sum library-web-preview-manifest.signed > library-web-preview-manifest.signed.sha256)
 
       - uses: actions/upload-artifact@v4
         with:
