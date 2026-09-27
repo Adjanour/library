@@ -134,6 +134,7 @@ The desktop build uses CEF so EPUB rendering is consistent across platforms. Lin
 
 - [Contributing](CONTRIBUTING.md) — contributor workflow, checks, and release hygiene.
 - [Getting started](docs/getting-started.md) — setup, build, run, and test Library.
+- [Web Preview](docs/web-preview.md) — run the local browser release from a small production bundle.
 - [Desktop packaging](docs/desktop-packaging.md) — build and validate CEF desktop artifacts.
 - [Installer guide](docs/installer.md) — manifests, signatures, caching, versioned installs, and rollback.
 - [Release readiness](docs/release-readiness.md) — certification gates for v0.1.1 and later.

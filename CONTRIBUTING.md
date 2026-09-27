@@ -52,6 +52,9 @@ xvfb-run -a installer/scripts/validate-desktop-epub.sh \
 - Keep installers user-owned. Do not add `sudo`, elevation prompts, package-manager calls, or writes to system directories as part of normal installation.
 - Update `CHANGELOG.md`, `PLAN.md`, or a focused guide when behavior or release status changes.
 
+The web preview is a local bundle, not a hosted service. Keep its launcher
+portable, user-owned, and free of package-manager or administrator requirements.
+
 ## Pull requests
 
 A good pull request explains:

@@ -1,0 +1,59 @@
+name: Web preview
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    name: Build local web preview
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.29.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/svelte/pnpm-lock.yaml
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.6
+
+      - name: Build frontend
+        working-directory: web/svelte
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Assemble preview bundle
+        run: |
+          mkdir -p dist/library-web-preview/deno dist/library-web-preview/web
+          cp deno/deno.json dist/library-web-preview/deno/deno.json
+          cp -R deno/src dist/library-web-preview/deno/src
+          cp -R web/static dist/library-web-preview/web/static
+          cp scripts/start-web-preview.sh dist/library-web-preview/start-web-preview.sh
+          cp docs/web-preview.md dist/library-web-preview/README.md
+          chmod +x dist/library-web-preview/start-web-preview.sh
+
+      - name: Archive preview bundle
+        run: |
+          tar -C dist -czf dist/library-web-preview.tar.gz library-web-preview
+          sha256sum dist/library-web-preview.tar.gz > dist/library-web-preview.tar.gz.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: library-web-preview
+          path: |
+            dist/library-web-preview.tar.gz
+            dist/library-web-preview.tar.gz.sha256
