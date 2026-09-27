@@ -52,6 +52,10 @@ jobs:
         working-directory: installer
         run: bash tests/web_preview_integration.sh
 
+      - name: Desktop preview integration
+        working-directory: installer
+        run: bash tests/desktop_integration.sh
+
   cross-build:
     name: Build ${{ matrix.target }}
     runs-on: ubuntu-latest

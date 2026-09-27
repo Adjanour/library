@@ -9,6 +9,9 @@
         "build.zig.zon",
         "src",
         "manifests",
+        "package",
+        "scripts",
+        "tests",
         "README.md",
     },
 }

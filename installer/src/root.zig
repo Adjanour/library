@@ -5,6 +5,7 @@ pub const verify = @import("verify.zig");
 pub const signed_manifest = @import("signed_manifest.zig");
 pub const install = @import("install.zig");
 pub const web_install = @import("web_install.zig");
+pub const desktop_install = @import("desktop_install.zig");
 pub const download = @import("download.zig");
 
 const std = @import("std");
@@ -103,4 +104,5 @@ test "trusted manifest signatures reject a substituted key" {
 
 test {
     std.testing.refAllDecls(web_install);
+    std.testing.refAllDecls(desktop_install);
 }

@@ -8,6 +8,7 @@ pub const Selection = struct {
     pub fn includes(self: Selection, id: manifest.PackageId) bool {
         return switch (id) {
             .library => true,
+            .library_desktop => false,
             .web_preview, .deno => false,
             .readest => self.readest,
             .sioyek => self.sioyek,

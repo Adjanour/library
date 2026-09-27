@@ -15,10 +15,10 @@ Download the small setup program for your machine from the
 - `library-web-setup-macos-x86_64.zip` for Intel Macs
 - `library-web-setup-linux-x86_64.tar.gz` for 64-bit Linux
 
-Run the downloaded setup program without arguments. It chooses a user-owned
-install folder, downloads the signed Web Preview manifest, installs a private
-Deno 2.9.6 runtime, verifies every download, caches the locked dependencies,
-creates a launcher, and opens Library at <http://localhost:8080>.
+Run the Web Preview command explicitly. It chooses a user-owned install folder,
+downloads the signed Web Preview manifest, installs a private Deno 2.9.6
+runtime, verifies every download, caches the locked dependencies, creates a
+launcher, and opens Library at <http://localhost:8080>.
 
 No account, separate Deno installation, administrator access, or `sudo` is
 required. The installer is small; the verified Deno and Library payloads add
@@ -29,7 +29,7 @@ about 45 MB during setup.
 Double-click `library-setup-windows-x86_64.exe`, or run it from PowerShell:
 
 ```powershell
-.\library-setup-windows-x86_64.exe
+.\library-setup-windows-x86_64.exe web-preview
 ```
 
 The files are installed under `%LOCALAPPDATA%\Library Preview`. The reusable

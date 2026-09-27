@@ -23,9 +23,11 @@ verification, signing, and installer certification.
 The current public artifact is
 [`v0.1.1-preview.1`](https://github.com/Adjanour/library/releases/tag/v0.1.1-preview.1).
 The Linux installer is experimental, user-owned, and does not require `sudo`.
-Small Web Preview setup binaries are available for Linux, Windows, and macOS;
-they install a verified private Deno runtime and require no administrator
-access. Windows and macOS builds are still unsigned preview software.
+Small native Desktop Preview setup binaries are available for Linux, Windows,
+and macOS; they download the matching verified CEF bundle and require no
+administrator access. The browser-only Web Preview remains available as an
+explicit fallback. Windows and macOS builds are still unsigned preview
+software.
 See [release readiness](docs/release-readiness.md) for the certification gates.
 
 ## Features
@@ -138,6 +140,7 @@ The desktop build uses CEF so EPUB rendering is consistent across platforms. Lin
 - [Contributing](CONTRIBUTING.md) — contributor workflow, checks, and release hygiene.
 - [Getting started](docs/getting-started.md) — setup, build, run, and test Library.
 - [Web Preview](docs/web-preview.md) — run the local browser release from a small production bundle.
+- [Desktop Preview](docs/desktop-preview.md) — install the native CEF preview with the small setup program.
 - [Desktop packaging](docs/desktop-packaging.md) — build and validate CEF desktop artifacts.
 - [Installer guide](docs/installer.md) — manifests, signatures, caching, versioned installs, and rollback.
 - [Release readiness](docs/release-readiness.md) — certification gates for v0.1.1 and later.

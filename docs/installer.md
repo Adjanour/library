@@ -14,23 +14,35 @@ mise exec -- zig build run -- sign-manifest <payload.json> <manifest.signed> <se
 
 Release signing must happen in protected CI with a secret-managed key. Never commit or pass a production signing key as a normal shell argument.
 
-## Web Preview setup
+## Desktop Preview setup
 
-Running a published setup binary without arguments selects `web-preview`. The
+Running a published setup binary without arguments selects `desktop-preview`.
+The
 installer:
 
 1. chooses the current user's platform data directory
 2. fetches the pinned signed manifest over HTTPS
-3. downloads the matching Deno runtime and Library Web Preview ZIP
+3. downloads the matching native CEF desktop archive
 4. checks declared sizes and SHA-256 digests
-5. extracts both payloads without calling a system archive utility
-6. caches the dependencies locked by `deno.lock`
-7. writes atomic current-version pointers and a reusable launcher
-8. creates a user-owned macOS app or Linux application-menu entry
-9. starts Library and opens the browser
+5. extracts the payload into versioned storage
+6. writes atomic current-version pointers and a reusable launcher
+7. creates a user-owned macOS app or Linux application-menu entry
+8. starts Library
 
-Use `web-preview --no-launch` to install without starting the server. The
-platform defaults are `%LOCALAPPDATA%\Library Preview` on Windows,
+Use `desktop-preview --no-launch` to install without starting the app. The
+platform defaults are `%LOCALAPPDATA%\Library` on Windows,
+`~/Library/Application Support/Library` on macOS, and
+`$XDG_DATA_HOME/library` or `~/.local/share/library` on Linux.
+
+## Web Preview setup
+
+Use the explicit `web-preview` command when a browser-only install is wanted.
+It downloads the matching Deno runtime and Library Web Preview ZIP, checks
+both payloads, caches locked dependencies, writes version pointers, creates a
+launcher, and opens the browser. Use `web-preview --no-launch` to install
+without starting the server.
+
+The Web Preview platform defaults are `%LOCALAPPDATA%\Library Preview` on Windows,
 `~/Library/Application Support/Library Preview` on macOS, and
 `$XDG_DATA_HOME/library-preview` or `~/.local/share/library-preview` on Linux.
 Use `--no-shortcuts` to suppress platform launcher integration.
@@ -62,7 +74,8 @@ library-setup-linux-x86_64 install-url \
   --root "$HOME/.local/share/library-preview"
 ```
 
-The Linux tarball is extracted into the selected version directory and the launcher is written to `library/bin/library`.
+The Linux desktop tarball is extracted into the selected version directory and
+the launcher is written to `desktop/bin/library`.
 
 ### User-owned installation
 
@@ -90,7 +103,7 @@ Rollback swaps `current.txt` and `previous.txt` after confirming the target vers
 
 ## Current limitations
 
-The Web Preview setup path is published for Linux x86_64, Windows x86_64,
+The Desktop Preview setup path is published for Linux x86_64, Windows x86_64,
 Intel macOS, and Apple Silicon macOS. Linux receives a user application-menu
 entry and macOS receives a user-owned app in `~/Applications`. The Windows and
 macOS binaries remain experimental until code signing, notarization, installer
