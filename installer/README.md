@@ -77,7 +77,7 @@ Use a directory owned by the user, such as:
 
 ```bash
 library-setup-linux-x86_64 install-url \
-  https://github.com/Adjanour/library/releases/download/v0.1.1-preview.1/library-preview-manifest.signed \
+  https://github.com/Adjanour/library/releases/download/v0.1.1-preview.1/library-web-preview-manifest.signed \
   --root "${XDG_DATA_HOME:-$HOME/.local/share}/library-preview"
 ```
 
