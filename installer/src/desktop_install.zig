@@ -160,7 +160,15 @@ fn writeLauncher(io: std.Io, allocator: std.mem.Allocator, root: std.Io.Dir, roo
                 "set /p VERSION=<\"%ROOT%\\desktop\\current.txt\"\r\n" ++
                 "set \"APP_ROOT=%ROOT%\\desktop\\versions\\%VERSION%\\Library\"\r\n" ++
                 "cd /d \"%APP_ROOT%\"\r\n" ++
-                "for %%L in (\"%APP_ROOT%\\*.bat\") do (\r\n" ++
+                "for /r \"%APP_ROOT%\" %%L in (*.bat) do (\r\n" ++
+                "  call \"%%~fL\" %*\r\n" ++
+                "  exit /b %%ERRORLEVEL%%\r\n" ++
+                ")\r\n" ++
+                "for /r \"%APP_ROOT%\" %%L in (*.cmd) do (\r\n" ++
+                "  call \"%%~fL\" %*\r\n" ++
+                "  exit /b %%ERRORLEVEL%%\r\n" ++
+                ")\r\n" ++
+                "for /r \"%APP_ROOT%\" %%L in (*.exe) do (\r\n" ++
                 "  call \"%%~fL\" %*\r\n" ++
                 "  exit /b %%ERRORLEVEL%%\r\n" ++
                 ")\r\n" ++

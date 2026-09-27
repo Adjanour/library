@@ -160,9 +160,11 @@ jobs:
             throw "The Windows desktop app directory is empty: $bundle"
           }
 
-          $denoLauncher = @($entries | Where-Object { $_.Name -like '*.bat' })
-          if ($denoLauncher.Count -ne 1) {
-            throw "Expected one Deno Windows launcher (.bat), found $($denoLauncher.Count)"
+          $denoLaunchers = @(Get-ChildItem -File -Recurse $bundle | Where-Object {
+            $_.Extension -in @('.bat', '.cmd', '.exe')
+          })
+          if ($denoLaunchers.Count -eq 0) {
+            throw "The Windows desktop app directory contains no runnable launcher"
           }
 
           $stage = "$env:RUNNER_TEMP\Library"
