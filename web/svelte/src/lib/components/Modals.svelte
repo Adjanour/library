@@ -19,15 +19,14 @@
     ['Ctrl / Cmd + K', 'Open command palette'],
     ['/', 'Focus search'],
     ['j / k', 'Navigate list'],
-    ['Enter / o', 'Open in reader'],
+    ['Enter / o', 'Open with system app'],
     ['r', 'Read in-app'],
-    ['e', 'Edit metadata'],
     ['d', 'Delete item'],
     ['R', 'Rescan library'],
     ['g / l', 'Grid / List view'],
     ['b', 'Reading dashboard'],
     ['p', 'Toggle preview panel'],
-    ['?', 'Toggle this help'],
+    ['?', 'Open / close this help'],
     ['Esc', 'Close / Back'],
   ];
 </script>
@@ -36,7 +35,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onclick={onCancelDelete} onkeydown={(e) => e.key === 'Escape' && onCancelDelete()}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="bg-surface-1 border border-border rounded-lg p-5 w-80 shadow-xl" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+    <div class="bg-surface-1 border border-border rounded-lg p-5 w-80 shadow-xl" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Escape') onCancelDelete(); }}>
       <h3 class="text-sm font-semibold mb-2">Delete Item</h3>
       <p class="text-xs text-text-secondary mb-4">Delete "{itemTitle}" from the library? This removes it from the index only (the file stays on disk).</p>
       <div class="flex gap-2 justify-end">
@@ -51,7 +50,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onclick={onCloseKeybindings} onkeydown={(e) => e.key === 'Escape' && onCloseKeybindings()}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="bg-surface-1 border border-border rounded-lg p-5 w-80 shadow-xl" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+    <div class="bg-surface-1 border border-border rounded-lg p-5 w-80 shadow-xl" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Escape' || e.key === '?') onCloseKeybindings(); }}>
       <h3 class="text-sm font-semibold mb-3">Keyboard Shortcuts</h3>
       <div class="space-y-1.5 text-xs">
         {#each shortcuts as [key, desc]}

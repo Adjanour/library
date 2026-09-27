@@ -150,6 +150,10 @@
     showSettings = false;
     await rescan();
   }
+  async function saveReadingPreferences(preferences: NonNullable<AppSettings['reading_preferences']>) {
+    const saved = await api.updateReadingPreferences(preferences);
+    if (appSettings) appSettings = { ...appSettings, reading_preferences: saved };
+  }
   async function deleteItem() { if (!selectedItem) return;
     try { await api.delete(selectedItem.id); selectedItem = null; showDeleteModal = false; search(); loadSidebarData(); } catch (e) { console.error(e); } }
   async function quitApp() {
@@ -158,16 +162,20 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    const t = e.target as HTMLElement;
-    const isInput = t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement;
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); showCommandPalette = true; return; }
-    if (e.key === '/' && !isInput) { e.preventDefault(); document.getElementById('search-input')?.focus(); return; }
+    const t = e.target as HTMLElement | null;
+    const isInput = !!t?.matches('input, textarea, select, [contenteditable="true"]');
+    if (readingItem) return;
     if (e.key === 'Escape') {
       if (showSettings) showSettings = false; else if (showCommandPalette) showCommandPalette = false; else if (readingItem) readingItem = null; else if (showDeleteModal) showDeleteModal = false;
       else if (showKeybindings) showKeybindings = false; else if (selectedItem) selectedItem = null;
       else (document.activeElement as HTMLElement)?.blur(); return;
     }
-    if (isInput || showDeleteModal || showKeybindings || readingItem) return;
+    if (showSettings || showDeleteModal || showCommandPalette) return;
+    if (e.key === '?' && !isInput) { e.preventDefault(); showKeybindings = !showKeybindings; return; }
+    if (showKeybindings) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); showCommandPalette = true; return; }
+    if (e.key === '/' && !isInput) { e.preventDefault(); document.getElementById('search-input')?.focus(); return; }
+    if (isInput) return;
     if (e.key === 'j' || e.key === 'ArrowDown') { const i = items.findIndex((x) => x.id === selectedItem?.id); if (i < items.length - 1) selectItem(items[i + 1]); e.preventDefault(); }
     if (e.key === 'k' || e.key === 'ArrowUp') { const i = items.findIndex((x) => x.id === selectedItem?.id); if (i > 0) selectItem(items[i - 1]); e.preventDefault(); }
     if ((e.key === 'Enter' || e.key === 'o') && selectedItem) { api.open(selectedItem.id); e.preventDefault(); }
@@ -178,7 +186,6 @@
     if (e.key === 'l') view = 'list';
     if (e.key === 'b') { view = 'reading'; loadDashboard(); }
     if (e.key === 'p') togglePreviewPanel();
-    if (e.key === '?') showKeybindings = true;
   }
   let hasFilters = $derived(!!query || !!activeType || !!activeCategory || !!activeTag || !!activePurpose);
   let commands = $derived([
@@ -196,7 +203,17 @@
     { id: 'theme', label: 'Toggle theme', hint: 'Switch between light and dark', run: toggleTheme },
   ]);
   $effect(() => { document.documentElement.setAttribute('data-theme', theme); });
-  onMount(() => { search(); loadSidebarData(); window.addEventListener('keydown', handleKeydown); });
+  onMount(() => {
+    search();
+    loadSidebarData();
+    window.addEventListener('keydown', handleKeydown);
+    api.settings().then(async (settings) => {
+      if (!settings.smoke_item_id) return;
+      const item = await api.item(settings.smoke_item_id);
+      selectedItem = item;
+      readingItem = item;
+    }).catch(() => {});
+  });
   onDestroy(() => { window.removeEventListener('keydown', handleKeydown); });
 </script>
 
@@ -367,4 +384,4 @@
 <Modals showDelete={showDeleteModal} showKeybindings={showKeybindings} itemTitle={selectedItem?.title || ''}
   onConfirmDelete={deleteItem} onCancelDelete={() => (showDeleteModal = false)} onCloseKeybindings={() => (showKeybindings = false)} />
 {#if showCommandPalette}<CommandPalette commands={commands} onClose={() => (showCommandPalette = false)} />{/if}
-{#if showSettings && appSettings}<SettingsPanel settings={appSettings} onClose={() => (showSettings = false)} onSave={saveSettings} />{/if}
+{#if showSettings && appSettings}<SettingsPanel settings={appSettings} onClose={() => (showSettings = false)} onSave={saveSettings} onSaveReading={saveReadingPreferences} />{/if}

@@ -40,7 +40,7 @@ Your `Deno.serve()` handler runs on a local port. The webview navigates to `http
 
 ## Key Features
 
-- **Small binaries**: Uses OS's built-in webview, not bundled Chromium
+- **Consistent reader rendering**: Uses bundled CEF because Linux WebKitGTK does not reliably complete EPUB chapter iframe loads
 - **Framework auto-detection**: Works with Next.js, SvelteKit, Astro, etc.
 - **Cross-compile**: Build for macOS, Windows, Linux from one machine
 - **Auto-update**: Built-in mechanism with binary-diff patches
@@ -60,7 +60,7 @@ All configuration lives in the `desktop` block in `deno.json`:
       "name": "My App",
       "identifier": "com.example.myapp"
     },
-    "backend": "webview",
+    "backend": "cef",
     "output": {
       "linux": "./dist/my-app"
     }

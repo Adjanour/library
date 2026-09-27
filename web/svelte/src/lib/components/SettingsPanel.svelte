@@ -1,11 +1,21 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { AppSettings } from '$lib/api';
+  import {
+    CONTENT_WIDTHS,
+    DEFAULT_READER_PREFERENCES,
+    FONT_SIZES,
+    LINE_HEIGHTS,
+    PDF_ZOOMS,
+    loadReaderPreferences,
+    saveReaderPreferences,
+  } from '$lib/readerPreferences';
 
-  let { settings, onClose, onSave }: {
+  let { settings, onClose, onSave, onSaveReading }: {
     settings: AppSettings;
     onClose: () => void;
     onSave: (directories: string[]) => Promise<void>;
+    onSaveReading: (preferences: typeof DEFAULT_READER_PREFERENCES) => Promise<void>;
   } = $props();
 
   let section = $state<'library' | 'reading' | 'about'>('library');
@@ -13,10 +23,30 @@
   let newDirectory = $state('');
   let saving = $state(false);
   let error = $state('');
+  let readingSaved = $state(false);
+  let savingReading = $state(false);
+  let readerPreferences = $state({ ...DEFAULT_READER_PREFERENCES });
 
   onMount(() => {
     directories = [...settings.scan_directories];
+    readerPreferences = settings.reading_preferences || loadReaderPreferences();
   });
+
+  async function saveReadingPreferences() {
+    savingReading = true;
+    try {
+      await onSaveReading(readerPreferences);
+      saveReaderPreferences(readerPreferences);
+      readingSaved = true;
+    } finally {
+      savingReading = false;
+    }
+  }
+
+  function resetReadingPreferences() {
+    readerPreferences = { ...DEFAULT_READER_PREFERENCES };
+    readingSaved = false;
+  }
 
   function addDirectory() {
     const path = newDirectory.trim();
@@ -46,7 +76,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="fixed inset-0 z-50 bg-black/55 backdrop-blur-[2px] flex items-center justify-center p-5" onclick={onClose} onkeydown={(event) => event.key === 'Escape' && onClose()}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="w-full max-w-3xl h-[min(620px,88vh)] overflow-hidden rounded-2xl border border-border bg-surface-0 shadow-2xl flex" role="dialog" aria-modal="true" aria-label="Settings" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
+  <div class="w-full max-w-3xl h-[min(620px,88vh)] overflow-hidden rounded-2xl border border-border bg-surface-0 shadow-2xl flex" role="dialog" aria-modal="true" aria-label="Settings" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={(event) => { event.stopPropagation(); if (event.key === 'Escape') onClose(); }}>
     <aside class="w-44 shrink-0 border-r border-border bg-surface-1 p-3">
       <div class="px-2 pt-1 pb-4 text-base font-semibold">Settings</div>
       <nav class="space-y-1" aria-label="Settings sections">
@@ -91,10 +121,40 @@
         {:else if section === 'reading'}
           <div class="max-w-xl">
             <h3 class="text-lg font-semibold">Reading preferences</h3>
-            <p class="mt-1 text-sm leading-5 text-text-secondary">Typography, page flow, theme, width, and zoom are saved directly from the reader. This keeps the main settings calm while the controls remain close to the page they affect.</p>
-            <div class="mt-6 rounded-xl border border-border bg-surface-1 p-4 text-sm">
-              <div class="font-medium">Reader-first defaults</div>
-              <div class="mt-1 text-text-secondary">IBM Plex typography · single-page EPUB flow · 120% PDF zoom · durable progress</div>
+            <p class="mt-1 text-sm leading-5 text-text-secondary">Set the defaults used whenever a PDF or EPUB opens. EPUB controls remain available inside the reader for quick adjustments.</p>
+            <div class="mt-6 grid grid-cols-[1fr_180px] items-center gap-x-8 gap-y-4 rounded-xl border border-border bg-surface-1 p-5 text-sm">
+              <label for="reader-font">Typeface</label>
+              <select id="reader-font" class="rounded-lg border border-border bg-surface-2 px-3 py-2" bind:value={readerPreferences.fontFamily}>
+                <option value="default">IBM Plex Serif</option><option value="sans">IBM Plex Sans</option><option value="serif">Serif</option><option value="mono">Monospace</option>
+              </select>
+              <label for="reader-size">EPUB text size</label>
+              <select id="reader-size" class="rounded-lg border border-border bg-surface-2 px-3 py-2" bind:value={readerPreferences.fontSize}>
+                {#each FONT_SIZES as value}<option value={value}>{value}%</option>{/each}
+              </select>
+              <label for="reader-line">Line spacing</label>
+              <select id="reader-line" class="rounded-lg border border-border bg-surface-2 px-3 py-2" bind:value={readerPreferences.lineHeight}>
+                {#each LINE_HEIGHTS as value}<option value={value}>{value}</option>{/each}
+              </select>
+              <label for="reader-width">Text column</label>
+              <select id="reader-width" class="rounded-lg border border-border bg-surface-2 px-3 py-2" bind:value={readerPreferences.contentWidth}>
+                {#each CONTENT_WIDTHS as value}<option value={value}>{value}px</option>{/each}
+              </select>
+              <label for="reader-theme">EPUB theme</label>
+              <select id="reader-theme" class="rounded-lg border border-border bg-surface-2 px-3 py-2 capitalize" bind:value={readerPreferences.theme}>
+                <option value="light">Light</option><option value="sepia">Sepia</option><option value="dark">Dark</option><option value="black">Black</option>
+              </select>
+              <label for="reader-flow">Page flow</label>
+              <select id="reader-flow" class="rounded-lg border border-border bg-surface-2 px-3 py-2" bind:value={readerPreferences.flow}>
+                <option value="paginated">Paginated</option><option value="scrolled">Continuous scroll</option>
+              </select>
+              <label for="reader-spread">Page spread</label>
+              <select id="reader-spread" class="rounded-lg border border-border bg-surface-2 px-3 py-2" bind:value={readerPreferences.spread}>
+                <option value="none">Single page</option><option value="both">Two pages</option>
+              </select>
+              <label for="pdf-zoom">PDF zoom</label>
+              <select id="pdf-zoom" class="rounded-lg border border-border bg-surface-2 px-3 py-2" bind:value={readerPreferences.pdfZoom}>
+                {#each PDF_ZOOMS as value}<option value={value}>{value}%</option>{/each}
+              </select>
             </div>
           </div>
         {:else}
@@ -115,6 +175,12 @@
           {#if error}<p class="min-w-0 flex-1 text-xs text-error">{error}</p>{:else}<div class="flex-1"></div>{/if}
           <button class="rounded-lg px-3 py-2 text-sm text-text-secondary hover:bg-surface-2" onclick={onClose}>Cancel</button>
           <button class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50" disabled={saving} onclick={save}>{saving ? 'Saving…' : 'Save & rescan'}</button>
+        </footer>
+      {:else if section === 'reading'}
+        <footer class="min-h-16 shrink-0 border-t border-border px-6 py-3 flex items-center gap-3">
+          <div class="flex-1 text-xs text-success">{readingSaved ? 'Reading defaults saved.' : ''}</div>
+          <button class="rounded-lg px-3 py-2 text-sm text-text-secondary hover:bg-surface-2" onclick={resetReadingPreferences}>Reset defaults</button>
+          <button class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50" disabled={savingReading} onclick={saveReadingPreferences}>{savingReading ? 'Saving…' : 'Save preferences'}</button>
         </footer>
       {/if}
     </section>

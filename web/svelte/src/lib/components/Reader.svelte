@@ -4,6 +4,14 @@
     import PdfReader from "$lib/components/PdfReader.svelte";
     import { releaseEpub, warmEpub } from "$lib/epubCache";
     import { openWithRenditionFallback, type EpubRenditionMethod } from "$lib/epubRendition";
+    import {
+        CONTENT_WIDTHS,
+        DEFAULT_READER_PREFERENCES,
+        FONT_SIZES,
+        LINE_HEIGHTS,
+        loadReaderPreferences,
+        saveReaderPreferences,
+    } from "$lib/readerPreferences";
 
     let {
         item,
@@ -39,17 +47,29 @@
     let loadingStage = $state("Opening book…");
     // Bumped on every reader change so a screenshot of the error text
     // identifies exactly which build produced it.
-    const READER_BUILD = "epub-trace-5";
+    const READER_BUILD = "epub-trace-6";
     // Milestones reached during open; appended to any error so a failure
     // can be localized (parse vs iframe-load vs layout) from a screenshot.
     let trace: string[] = [];
     let traceT0 = 0;
+    function report(event: string, detail: Record<string, unknown> = {}) {
+        void api.epubDiagnostic({
+            event,
+            item_id: item.id,
+            build: READER_BUILD,
+            elapsed_ms: traceT0 ? Math.round(performance.now() - traceT0) : 0,
+            user_agent: navigator.userAgent,
+            ...detail,
+        }).catch(() => {});
+    }
     function note(step: string) {
         if (!traceT0) traceT0 = performance.now();
         trace.push(`${step}@${Math.round(performance.now() - traceT0)}ms`);
+        report("milestone", { step });
     }
     function fail(message: string) {
         error = `${message} [trace: ${trace.join("→") || "none"}] [build ${READER_BUILD}]`;
+        report("failure", { message, trace });
     }
 
     // Load one minimal chapter through each iframe method the library
@@ -72,7 +92,15 @@
                 };
                 const frame = document.createElement("iframe");
                 frame.style.cssText = "position:absolute;width:10px;height:10px;visibility:hidden";
-                const timer = setTimeout(() => finish("timeout"), 4000);
+                const timer = setTimeout(() => {
+                    try {
+                        const state = frame.contentDocument?.readyState || "none";
+                        const hasBody = !!frame.contentDocument?.body?.textContent;
+                        finish(`timeout-${state}-${hasBody ? "content" : "empty"}`);
+                    } catch {
+                        finish("timeout-blocked");
+                    }
+                }, 4000);
                 frame.onload = () => {
                     try {
                         const ok = !!frame.contentDocument?.body;
@@ -149,9 +177,6 @@
     }
 
     // ── Reader settings (persisted in localStorage) ──────────────────────
-    const FONT_SIZES = [80, 90, 100, 110, 125, 150, 175, 200];
-    const LINE_HEIGHTS = [1.35, 1.5, 1.65, 1.8, 2];
-    const CONTENT_WIDTHS = [560, 640, 720, 840, 960];
     const FONT_FAMILIES: Record<string, string> = {
         default: "'IBM Plex Serif', Georgia, 'Times New Roman', serif",
         serif: "'IBM Plex Serif', Georgia, 'Times New Roman', serif",
@@ -165,31 +190,24 @@
         black: { bg: "#090909", fg: "#e2e2e2" },
     };
 
-    let settings = $state({
-        fontSize: 100,
-        fontFamily: "default",
-        lineHeight: 1.65,
-        contentWidth: 720,
-        theme: "light",
-        spread: "none" as "none" | "both",
-        flow: "paginated" as "paginated" | "scrolled",
-    });
+    let settings = $state({ ...DEFAULT_READER_PREFERENCES });
 
     // Load saved settings once on mount (NOT in $effect — that would
     // read + write `settings` in the same effect → infinite loop).
-    function loadSettings() {
+    async function loadSettings() {
         try {
-            const saved = localStorage.getItem("library:epub-settings");
-            if (saved) settings = { ...settings, ...JSON.parse(saved) };
+            const appSettings = await api.settings();
+            settings = appSettings.reading_preferences || loadReaderPreferences();
             const savedBookmarks = localStorage.getItem(`library:epub-bookmarks:${item.id}`);
             if (savedBookmarks) bookmarks = JSON.parse(savedBookmarks);
-        } catch {}
+        } catch {
+            settings = loadReaderPreferences();
+        }
     }
 
     function saveSettings() {
-        try {
-            localStorage.setItem("library:epub-settings", JSON.stringify(settings));
-        } catch {}
+        try { saveReaderPreferences(settings); } catch {}
+        void api.updateReadingPreferences(settings).catch(() => {});
     }
 
     // ── Settings actions ─────────────────────────────────────────────────
@@ -202,7 +220,7 @@
     }
 
     function changeFontFamily(fam: string) {
-        settings.fontFamily = fam;
+        settings.fontFamily = fam as typeof settings.fontFamily;
         applyFontFamily();
         saveSettings();
     }
@@ -224,7 +242,7 @@
     }
 
     function changeTheme(theme: string) {
-        settings.theme = theme;
+        settings.theme = theme as typeof settings.theme;
         applyTheme();
         saveSettings();
     }
@@ -246,6 +264,14 @@
         if (isPdf) return;
         showSettings = false;
         showPanel = showPanel === panel ? null : panel;
+    }
+
+    function toggleFocusMode() {
+        focusMode = !focusMode;
+        if (focusMode) {
+            showSettings = false;
+            showPanel = null;
+        }
     }
 
     function saveBookmarks() {
@@ -396,15 +422,21 @@
             }
         }
         if (e.key.toLowerCase() === "b" && ready) toggleBookmark();
-        if (e.key.toLowerCase() === "t" && ready) togglePanel("contents");
-        if (e.key.toLowerCase() === "f" && ready) focusMode = !focusMode;
-        if (e.key === "+" || e.key === "=") changeFontSize(1);
-        if (e.key === "-") changeFontSize(-1);
+        if (e.key.toLowerCase() === "t" && ready) { e.preventDefault(); togglePanel("contents"); }
+        if (e.key.toLowerCase() === "f" && ready) { e.preventDefault(); toggleFocusMode(); }
+        if (e.key.toLowerCase() === "b" && ready) e.preventDefault();
+        if (e.key === "+" || e.key === "=") { e.preventDefault(); changeFontSize(1); }
+        if (e.key === "-") { e.preventDefault(); changeFontSize(-1); }
     }
 
     onMount(async () => {
         window.addEventListener("keydown", onKey);
-        loadSettings();
+        await loadSettings();
+        report("reader-mounted", {
+            origin: location.origin,
+            secure_context: isSecureContext,
+            cross_origin_isolated: crossOriginIsolated,
+        });
         sessionStart = api.startReading(item.id).then(() => {
             sessionStarted = true;
         }).catch(() => {});
@@ -597,7 +629,7 @@
             class:bg-surface-3={focusMode}
             title="Focus mode (F)"
             aria-label="Toggle focus mode"
-            onclick={() => (focusMode = !focusMode)}
+            onclick={toggleFocusMode}
         >
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" /></svg>
         </button>

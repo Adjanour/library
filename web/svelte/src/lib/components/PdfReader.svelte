@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from "svelte";
     import { api } from "$lib/api";
+    import { DEFAULT_READER_PREFERENCES, loadReaderPreferences } from "$lib/readerPreferences";
     import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
     let {
@@ -20,7 +21,7 @@
     let error = $state("");
     let totalPages = $state(0);
     let currentPage = $state(1);
-    const DEFAULT_SCALE = 120;
+    const DEFAULT_SCALE = DEFAULT_READER_PREFERENCES.pdfZoom;
     let scalePct = $state(DEFAULT_SCALE);
     let showSearch = $state(false);
     let searchQuery = $state("");
@@ -189,10 +190,13 @@
             e.preventDefault();
             prevPage();
         } else if (e.key === "+" || e.key === "=") {
+            e.preventDefault();
             zoomIn();
         } else if (e.key === "-") {
+            e.preventDefault();
             zoomOut();
         } else if (e.key === "0") {
+            e.preventDefault();
             resetZoom();
         } else if (e.key.toLowerCase() === "t" && !loading) {
             e.preventDefault();
@@ -202,6 +206,8 @@
 
     onMount(async () => {
         window.addEventListener("keydown", onKey);
+        const appSettings = await api.settings().catch(() => null);
+        scalePct = appSettings?.reading_preferences?.pdfZoom ?? loadReaderPreferences().pdfZoom;
         if (!container || !viewerEl) return;
         try {
             const pdfjsLib = await import("pdfjs-dist");

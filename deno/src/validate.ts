@@ -30,3 +30,22 @@ export const IdParamSchema = z.object({
 export const SettingsSchema = z.object({
   scan_directories: z.array(z.string().trim().min(1)).min(1).max(20),
 });
+
+export const ReaderPreferencesSchema = z.object({
+  fontSize: z.number().refine((value) =>
+    [80, 90, 100, 110, 125, 150, 175, 200].includes(value)
+  ),
+  fontFamily: z.enum(["default", "serif", "sans", "mono"]),
+  lineHeight: z.number().refine((value) =>
+    [1.35, 1.5, 1.65, 1.8, 2].includes(value)
+  ),
+  contentWidth: z.number().refine((value) =>
+    [560, 640, 720, 840, 960].includes(value)
+  ),
+  theme: z.enum(["light", "sepia", "dark", "black"]),
+  spread: z.enum(["none", "both"]),
+  flow: z.enum(["paginated", "scrolled"]),
+  pdfZoom: z.number().refine((value) =>
+    [80, 100, 110, 120, 135, 150, 175, 200].includes(value)
+  ),
+});

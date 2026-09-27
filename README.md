@@ -121,7 +121,7 @@ web/
 
 ## Data
 
-The SQLite database follows each platform's application-data convention:
+The SQLite database follows each platform's application-data convention. Desktop builds use the CEF backend so EPUB rendering behaves consistently across Linux, macOS, and Windows; this trades a larger install for a predictable reading engine.
 
 - Linux: `$XDG_DATA_HOME/library/library.db` or `~/.local/share/library/library.db`
 - macOS: `~/Library/Application Support/library/library.db`

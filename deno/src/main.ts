@@ -8,6 +8,7 @@ import { AppError } from "./result.ts";
 import {
   IdParamSchema,
   ItemUpdateSchema,
+  ReaderPreferencesSchema,
   SearchQuerySchema,
   SettingsSchema,
 } from "./validate.ts";
@@ -16,7 +17,8 @@ import { appCacheRoot, defaultScanDirectories } from "./platform.ts";
 
 const app = new Hono();
 const db = new DB();
-const APP_VERSION = "0.2.0-dev";
+const APP_VERSION = "0.1.1-dev";
+const epubDiagnostics: Array<Record<string, unknown>> = [];
 
 const DEFAULT_SCAN_DIRS = defaultScanDirectories();
 
@@ -28,6 +30,17 @@ function configuredScanDirectories(): string[] {
     return Array.isArray(value) && value.length > 0 ? value : DEFAULT_SCAN_DIRS;
   } catch {
     return DEFAULT_SCAN_DIRS;
+  }
+}
+
+function configuredReaderPreferences() {
+  const raw = db.getSetting("reader_preferences");
+  if (!raw) return undefined;
+  try {
+    const parsed = ReaderPreferencesSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -84,7 +97,32 @@ app.get("/api/settings", () =>
     scan_directories: configuredScanDirectories(),
     platform: Deno.build.os,
     version: APP_VERSION,
+    smoke_item_id: Number(Deno.env.get("LIBRARY_EPUB_SMOKE_ID")) || undefined,
+    reading_preferences: configuredReaderPreferences(),
   }));
+
+app.put("/api/settings/reading", async (c) => {
+  const parsed = ReaderPreferencesSchema.safeParse(
+    await c.req.json().catch(() => null),
+  );
+  if (!parsed.success) {
+    return Response.json({ error: parsed.error.message }, { status: 400 });
+  }
+  db.setSetting("reader_preferences", JSON.stringify(parsed.data));
+  return Response.json(parsed.data);
+});
+
+app.get("/api/diagnostics/epub", () => Response.json(epubDiagnostics));
+
+app.post("/api/diagnostics/epub", async (c) => {
+  const payload = await c.req.json().catch(() => ({}));
+  epubDiagnostics.push({
+    timestamp: new Date().toISOString(),
+    ...(payload && typeof payload === "object" ? payload : { payload }),
+  });
+  if (epubDiagnostics.length > 200) epubDiagnostics.splice(0, 100);
+  return c.json({ ok: true }, 201);
+});
 
 app.put("/api/settings", async (c) => {
   const parsed = SettingsSchema.safeParse(await c.req.json().catch(() => null));

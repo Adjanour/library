@@ -7,14 +7,18 @@ All notable changes to Library are documented here.
 ### Added
 
 - A calm, keyboard-accessible settings panel for configuring persistent library scan folders.
+- SQLite-backed reading defaults for EPUB typography, theme, flow, spread, and PDF zoom.
 - Platform-aware application data/cache paths and external-file launchers for Linux, macOS, and Windows.
 - EPUB rendition fallback across `write`, `srcdoc`, and blob URL iframe strategies.
+- Local EPUB startup telemetry and an automated packaged-app smoke mode.
 
 ### Fixed
 
 - All-caps research-paper titles are no longer rejected as corrupt metadata.
 - Scanner tests no longer depend on files in one developer's home directory; the full Go suite now passes everywhere.
 - Full-text search now treats punctuation-heavy titles as text instead of FTS query syntax.
+- The desktop bundle now uses CEF because Linux WebKitGTK did not complete EPUB chapter iframe loads; the exact failing EPUB opens in about 330 ms in the packaged engine.
+- Keyboard shortcuts no longer leak through readers or modal surfaces, and the shortcut reference matches implemented behavior.
 - Svelte validation is clean with zero errors and zero warnings.
 
 ## [0.1.1] - 2026-09-26

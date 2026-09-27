@@ -40,7 +40,7 @@ my-app/
         "linux": "./icon.png"
       }
     },
-    "backend": "webview",
+    "backend": "cef",
     "output": {
       "linux": "../dist/app"
     }
@@ -51,7 +51,7 @@ my-app/
 ### Key points:
 - `"exports"` — entry point for `deno desktop`
 - `"--include ../web/static"` — embeds frontend files in the binary
-- `"backend": "webview"` — uses OS native webview (small binary)
+- `"backend": "cef"` — bundles Chromium for consistent EPUB rendering across platforms
 - `"output"` — where the built app goes
 
 ## Step 3: Write Your Server

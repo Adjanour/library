@@ -1,6 +1,6 @@
 {
   "name": "library",
-  "version": "1.0.0",
+  "version": "0.1.1-dev",
   "exports": "./src/main.ts",
   "tasks": {
     "dev": "deno run --allow-all --watch src/main.ts",
@@ -29,7 +29,7 @@
         "linux": "./icon.png"
       }
     },
-    "backend": "webview",
+    "backend": "cef",
     "output": {
       "linux": "../dist/app"
     }
