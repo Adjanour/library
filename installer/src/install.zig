@@ -43,9 +43,16 @@ pub fn library(io: std.Io, allocator: std.mem.Allocator, release: *const manifes
     const source = try download.acquire(io, allocator, item.artifact, cache_dir, .{ .ca_cert_path = options.ca_cert_path, .allow_insecure_http = options.allow_insecure_http });
     defer allocator.free(source);
 
-    const destination = try std.fmt.allocPrint(allocator, "{s}/library/.library-staging/library-artifact", .{options.root});
-    defer allocator.free(destination);
-    try std.Io.Dir.copyFileAbsolute(source, destination, io, .{ .make_path = true, .replace = true });
+    const staging_path = try std.fmt.allocPrint(allocator, "{s}/library/.library-staging", .{options.root});
+    defer allocator.free(staging_path);
+    if (item.artifact.kind == .tar_gz) {
+        if (target.os != .linux) return error.UnsupportedArchiveTarget;
+        try extractLinuxArchive(io, allocator, source, staging_path);
+    } else {
+        const destination = try std.fmt.allocPrint(allocator, "{s}/library/.library-staging/library-artifact", .{options.root});
+        defer allocator.free(destination);
+        try std.Io.Dir.copyFileAbsolute(source, destination, io, .{ .make_path = true, .replace = true });
+    }
 
     var receipt = try staging.createFileAtomic(io, "receipt.txt", .{ .replace = true });
     defer receipt.deinit(io);
@@ -64,6 +71,39 @@ pub fn library(io: std.Io, allocator: std.mem.Allocator, release: *const manifes
     defer if (current) |value| allocator.free(value);
     if (current) |previous| try writePointer(io, root, "library/previous.txt", previous);
     try writePointer(io, root, "library/current.txt", item.package.version);
+    try writeLauncher(io, root);
+}
+
+fn extractLinuxArchive(io: std.Io, allocator: std.mem.Allocator, source: []const u8, destination: []const u8) !void {
+    const result = try std.process.run(allocator, io, .{
+        .argv = &.{ "tar", "-xzf", source, "-C", destination, "--strip-components=1", "--no-same-owner", "--no-same-permissions" },
+        .stdout_limit = .limited(64 * 1024),
+        .stderr_limit = .limited(64 * 1024),
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    switch (result.term) {
+        .exited => |code| if (code != 0) return error.ArchiveExtractionFailed,
+        else => return error.ArchiveExtractionFailed,
+    }
+}
+
+fn writeLauncher(io: std.Io, root: std.Io.Dir) !void {
+    try root.createDirPath(io, "library/bin");
+    var launcher = try root.createFileAtomic(io, "library/bin/library", .{ .replace = true });
+    defer launcher.deinit(io);
+    try launcher.file.setPermissions(io, .executable_file);
+    var buffer: [512]u8 = undefined;
+    var writer = launcher.file.writer(io, &buffer);
+    try writer.interface.writeAll(
+        "#!/bin/sh\n" ++
+            "set -eu\n" ++
+            "BASE=$(CDPATH= cd -- \"$(dirname -- \"$0\")/..\" && pwd)\n" ++
+            "VERSION=$(cat \"$BASE/current.txt\")\n" ++
+            "exec \"$BASE/versions/$VERSION/app\" \"$@\"\n",
+    );
+    try writer.flush();
+    try launcher.replace(io);
 }
 
 pub fn rollback(io: std.Io, allocator: std.mem.Allocator, root_path: []const u8) !void {

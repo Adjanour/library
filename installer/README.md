@@ -2,7 +2,7 @@
 
 `library-setup` is the thin, native bootstrapper for Library and its optional Readest and Sioyek integrations.
 
-The current slice has a safe versioned install path. It parses a signed release manifest, detects the compiled target, selects exact artifacts, verifies SHA-256 and Ed25519 data, and activates releases through an atomic version pointer. Platform-specific package installers remain separate work.
+The preview installer has a Linux-only end-to-end path. It fetches a signed release manifest over HTTPS, detects the compiled target, selects the exact artifact, verifies SHA-256 and Ed25519 data, extracts the Linux tarball, creates a launcher, and activates releases through an atomic version pointer. Windows and macOS package installers remain separate work.
 
 ```bash
 mise exec -- zig version
@@ -12,12 +12,13 @@ mise exec -- zig build run -- help
 mise exec -- zig build run -- verify-file <path> <sha256>
 mise exec -- zig build run -- sign-manifest <payload> <output> <seed-hex>
 mise exec -- zig build run -- install <signed-manifest> --root <absolute-directory>
+mise exec -- zig build run -- install-url <https-signed-manifest> --root <absolute-directory>
 mise exec -- zig build run -- rollback <absolute-directory>
 ```
 
 The development manifest contains unresolved versions and placeholder digests. The planner can parse it, but intentionally refuses to treat it as installable.
 
-The install path supports signed local `file://` artifacts and HTTPS acquisition. HTTPS artifacts stream into a SHA-256-addressed cache with retry handling, temporary `.part` files, declared-size checks, and verification before cache promotion. Verified artifacts install into `library/versions/<version>`, then an atomic `current.txt` pointer switch activates them. The previous version is retained in `previous.txt` and can be restored with `rollback`.
+The install path supports signed local `file://` artifacts and HTTPS acquisition. HTTPS artifacts stream into a SHA-256-addressed cache with retry handling, temporary `.part` files, declared-size checks, and verification before cache promotion. Linux `tar_gz` artifacts are extracted into `library/versions/<version>`, a `library/bin/library` launcher follows `current.txt`, and the previous version is retained in `previous.txt` and can be restored with `rollback`.
 
 `sign-manifest` is a development fixture tool. Release CI must sign generated manifests using a protected signing secret, not a command-line seed.
 
@@ -33,4 +34,4 @@ The HTTPS downloader is compile-verified on Linux, Windows, and macOS targets. T
 
 GitHub Actions runs this Linux integration suite on installer changes and separately verifies the Windows and macOS cross-builds. The workflow is intentionally validation-only; it does not publish artifacts or releases.
 
-The Linux host build is verified locally. The executable also cross-compiles for `x86_64-windows-gnu` and `aarch64-macos`; those targets are build-capable, not release-certified. Native packaging, signing, install/elevation, and end-to-end reader verification remain release work.
+The Linux host build is verified locally. The executable also cross-compiles for `x86_64-windows-gnu` and `aarch64-macos`; those targets are build-capable, not release-certified. The public `v0.1.1-preview.1` installer is explicitly experimental and Linux-only. It does not install Readest or Sioyek, create desktop entries, elevate permissions, or provide Windows/macOS package installation.

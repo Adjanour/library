@@ -29,7 +29,17 @@ mise exec -- zig build -Dtarget=aarch64-macos --summary all
 mise exec -- zig build run -- install <manifest.signed> --root <absolute-directory>
 ```
 
-Installs are stored as `library/current.txt`, `library/previous.txt`, and `library/versions/<version>/library-artifact`. The active pointer changes only after download, checksum verification, staging, and receipt creation succeed.
+Installs are stored as `library/current.txt`, `library/previous.txt`, and `library/versions/<version>/`. The active pointer changes only after download, checksum verification, staging, and receipt creation succeed.
+
+For the Linux preview installer, use the signed remote manifest:
+
+```bash
+library-setup-linux-x86_64 install-url \
+  https://github.com/Adjanour/library/releases/download/v0.1.1-preview.1/library-preview-manifest.signed \
+  --root "$HOME/.local/share/library-preview"
+```
+
+The Linux tarball is extracted into the selected version directory and the launcher is written to `library/bin/library`.
 
 ## Rollback
 
@@ -41,4 +51,4 @@ Rollback swaps `current.txt` and `previous.txt` after confirming the target vers
 
 ## Current limitations
 
-Platform-specific executable permissions, shortcuts, file associations, elevation, release artifact generation, and Readest/Sioyek payload installation are not complete.
+The public preview installer is experimental and Linux-only. Platform-specific shortcuts, file associations, elevation, release signing policy, and Readest/Sioyek payload installation are not complete. Windows and macOS binaries are build-capable but do not have public installer packages yet.

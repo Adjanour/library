@@ -3,7 +3,7 @@ const std = @import("std");
 pub const Os = enum { linux, macos, windows };
 pub const Arch = enum { x86_64, aarch64 };
 pub const PackageId = enum { library, readest, sioyek };
-pub const InstallKind = enum { appimage, deb, dmg, msi, exe, portable_zip };
+pub const InstallKind = enum { appimage, deb, dmg, msi, exe, portable_zip, tar_gz };
 
 pub const Artifact = struct {
     os: Os,

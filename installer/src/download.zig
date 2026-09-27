@@ -3,11 +3,42 @@ const manifest = @import("manifest.zig");
 const verify = @import("verify.zig");
 
 pub const max_attempts = 3;
+pub const max_manifest_bytes = 1024 * 1024;
 
 pub const Options = struct {
     ca_cert_path: ?[]const u8 = null,
     allow_insecure_http: bool = false,
 };
+
+pub fn fetchManifest(io: std.Io, allocator: std.mem.Allocator, url: []const u8, cache_dir: []const u8) ![]u8 {
+    if (!std.mem.startsWith(u8, url, "https://")) return error.ManifestMustUseHttps;
+    if (!std.fs.path.isAbsolute(cache_dir)) return error.CacheRootMustBeAbsolute;
+    try std.Io.Dir.cwd().createDirPath(io, cache_dir);
+    var cache = try std.Io.Dir.openDirAbsolute(io, cache_dir, .{});
+    defer cache.close(io);
+
+    var file = try cache.createFileAtomic(io, "manifest.part", .{ .replace = true });
+    var buffer: [64 * 1024]u8 = undefined;
+    var writer = file.file.writer(io, &buffer);
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
+    const result = client.fetch(.{
+        .location = .{ .url = url },
+        .response_writer = &writer.interface,
+    }) catch |err| {
+        client.deinit();
+        file.deinit(io);
+        return err;
+    };
+    try writer.flush();
+    client.deinit();
+    try file.replace(io);
+    file.deinit(io);
+    if (result.status.class() != .success) return error.ManifestHttpStatusNotSuccessful;
+
+    const bytes = try cache.readFileAlloc(io, "manifest.part", allocator, .limited(max_manifest_bytes));
+    cache.deleteFile(io, "manifest.part") catch {};
+    return bytes;
+}
 
 pub fn acquire(
     io: std.Io,

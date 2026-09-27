@@ -25,6 +25,8 @@ The next public artifact is `v0.1.1-preview.1`:
 - macOS: native CI build-capable; not certified.
 - Installer: development and validation foundation; not yet a polished public installer.
 
+The Linux preview installer is now available as an explicitly experimental binary. It installs the preview archive from a signed remote manifest, creates a launcher, and supports rollback.
+
 The preview must not imply Windows/macOS signing, notarization, installer metadata, or real-device EPUB verification.
 
 ## Next engineering slices

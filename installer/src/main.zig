@@ -29,6 +29,11 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
+    if (std.mem.eql(u8, command, "install-url")) {
+        try installUrl(init.io, init.gpa, &args);
+        return;
+    }
+
     if (std.mem.eql(u8, command, "rollback")) {
         const root = args.next() orelse return error.MissingInstallRoot;
         try installer.install.rollback(init.io, init.gpa, root);
@@ -52,10 +57,27 @@ fn printHelp(io: std.Io) !void {
             "  library-setup plan [--with-readest] [--with-sioyek]\n" ++
             "  library-setup verify-file <path> <sha256>\n" ++
             "  library-setup install <signed-manifest> --root <absolute-directory> [--ca-cert <absolute-pem>] [--allow-http]\n" ++
+            "  library-setup install-url <https-signed-manifest> --root <absolute-directory>\n" ++
             "  library-setup rollback <absolute-directory>\n" ++
             "  library-setup sign-manifest <payload> <output> <seed-hex>\n",
     );
     try writer.interface.flush();
+}
+
+fn installUrl(io: std.Io, allocator: std.mem.Allocator, args: *std.process.Args.Iterator) !void {
+    const url = args.next() orelse return error.MissingManifestUrl;
+    var root: ?[]const u8 = null;
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--root")) {
+            root = args.next() orelse return error.MissingInstallRoot;
+        } else return error.UnknownInstallOption;
+    }
+    const install_root = root orelse return error.MissingInstallRoot;
+    const cache_dir = try std.fmt.allocPrint(allocator, "{s}/library/cache", .{install_root});
+    defer allocator.free(cache_dir);
+    const bytes = try installer.download.fetchManifest(io, allocator, url, cache_dir);
+    defer allocator.free(bytes);
+    try installManifestBytes(io, allocator, bytes, install_root, null, false);
 }
 
 fn signManifest(io: std.Io, allocator: std.mem.Allocator, args: *std.process.Args.Iterator) !void {
@@ -99,6 +121,10 @@ fn install(io: std.Io, allocator: std.mem.Allocator, args: *std.process.Args.Ite
     const install_root = root orelse return error.MissingInstallRoot;
     const bytes = try std.Io.Dir.cwd().readFileAlloc(io, manifest_path, allocator, .limited(8 * 1024 * 1024));
     defer allocator.free(bytes);
+    try installManifestBytes(io, allocator, bytes, install_root, ca_cert, allow_http);
+}
+
+fn installManifestBytes(io: std.Io, allocator: std.mem.Allocator, bytes: []const u8, install_root: []const u8, ca_cert: ?[]const u8, allow_http: bool) !void {
     const signed = try installer.signed_manifest.parse(bytes);
     try installer.verify.verifyManifestSignature(signed.payload, signed.signature_hex, signed.public_key_hex);
     var parsed = try installer.manifest.parse(allocator, signed.payload);
