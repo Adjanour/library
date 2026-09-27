@@ -132,11 +132,8 @@ fn extractZip(io: std.Io, allocator: std.mem.Allocator, source: []const u8, dest
 }
 
 fn makeExecutable(io: std.Io, destination: []const u8, target: platform.Target) !void {
-    const relative = switch (target.os) {
-        .linux => "app/app",
-        .macos => "Library.app/Contents/MacOS/Library",
-        .windows => return,
-    };
+    if (target.os != .linux) return;
+    const relative = "app/app";
     const executable = try std.fs.path.join(std.heap.page_allocator, &.{ destination, relative });
     defer std.heap.page_allocator.free(executable);
     var file = try std.Io.Dir.openFileAbsolute(io, executable, .{ .mode = .read_write });
@@ -171,8 +168,7 @@ fn writeLauncher(io: std.Io, allocator: std.mem.Allocator, root: std.Io.Dir, roo
                 "ROOT=$(CDPATH= cd -- \"$(dirname -- \"$0\")/../..\" && pwd)\n" ++
                 "VERSION=$(cat \"$ROOT/desktop/current.txt\")\n" ++
                 "APP_ROOT=\"$ROOT/desktop/versions/$VERSION/Library.app\"\n" ++
-                "cd \"$APP_ROOT/Contents/MacOS\"\n" ++
-                "exec \"$APP_ROOT/Contents/MacOS/Library\" \"$@\"\n",
+                "exec open \"$APP_ROOT\" --args \"$@\"\n",
         ),
         .linux => try writer.interface.writeAll(
             "#!/bin/sh\n" ++

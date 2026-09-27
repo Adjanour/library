@@ -193,10 +193,8 @@ jobs:
         run: deno desktop --allow-all --include ../web/static --target ${{ matrix.target }} --output ../dist/library-macos src/main.ts
       - name: Package macOS desktop bundle
         run: |
-          mkdir -p "$RUNNER_TEMP/Library.app/Contents/MacOS" publish
-          cp dist/library-macos "$RUNNER_TEMP/Library.app/Contents/MacOS/Library"
-          cp installer/package/macos/Library.app/Contents/Info.plist "$RUNNER_TEMP/Library.app/Contents/Info.plist"
-          chmod +x "$RUNNER_TEMP/Library.app/Contents/MacOS/Library"
+          mkdir -p publish
+          ditto dist/library-macos.app "$RUNNER_TEMP/Library.app"
           ditto -c -k --keepParent "$RUNNER_TEMP/Library.app" "publish/library-desktop-macos-${{ matrix.arch }}.zip"
           (cd publish && shasum -a 256 "library-desktop-macos-${{ matrix.arch }}.zip" > "library-desktop-macos-${{ matrix.arch }}.zip.sha256")
       - uses: actions/upload-artifact@v4
