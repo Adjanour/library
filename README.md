@@ -137,6 +137,7 @@ The desktop build uses CEF so EPUB rendering is consistent across platforms. Lin
 - [Desktop packaging](docs/desktop-packaging.md) — build and validate CEF desktop artifacts.
 - [Installer guide](docs/installer.md) — manifests, signatures, caching, versioned installs, and rollback.
 - [Release readiness](docs/release-readiness.md) — certification gates for v0.1.1 and later.
+- [Preview testing](docs/preview-testing.md) — shareable checklist for Windows, macOS, and Linux testers.
 - [Deno Desktop reference](deno/DESKTOP.md) — runtime architecture and configuration.
 
 Metadata extraction currently uses Poppler tools (`pdfinfo`, `pdftotext`) and `unzip` when available. Missing tools degrade to filename metadata rather than preventing the library or in-app readers from working.
