@@ -73,15 +73,11 @@
                 localStorage.setItem(`library:pdf-page:${item.id}`, String(currentPage));
             } catch {}
             onProgress?.(currentPage, totalPages);
-            api.readingProgress(item.id)
-                .then((progress) =>
-                    api.updateProgress(item.id, {
-                        ...progress,
-                        current_page: currentPage,
-                        total_pages: totalPages,
-                        progress_percent: percent,
-                    }),
-                )
+            api.updateProgress(item.id, {
+                current_page: currentPage,
+                total_pages: totalPages,
+                progress_percent: percent,
+            })
                 .catch(() => {});
         }, 500);
     }

@@ -1,5 +1,13 @@
 import { assertEquals } from "@std/assert";
-import { extractTitle, extractAuthors, extractYear } from "../src/scanner.ts";
+import {
+  extractTitle,
+  extractAuthors,
+  extractYear,
+  extractTitleFromFirstPageText,
+  scanDirectory,
+} from "../src/scanner.ts";
+import { DB } from "../src/db.ts";
+import { assert } from "@std/assert";
 
 Deno.test("extractTitle cleans filenames", () => {
   const cases = [
@@ -45,4 +53,58 @@ Deno.test("extractYear finds 4-digit years", () => {
   for (const { input, want } of cases) {
     assertEquals(extractYear(input), want, `failed for: ${input}`);
   }
+});
+
+Deno.test("first-page title extraction rejects continuation lines", () => {
+  assertEquals(
+    extractTitleFromFirstPageText(
+      "Department of Computer Science\n& Engineering\nA Reliable Systems Paper\nJane Doe",
+    ),
+    "A Reliable Systems Paper",
+  );
+});
+
+Deno.test("scan marks missing files without deleting reading history", async () => {
+  const db = new DB(":memory:");
+  const root = await Deno.makeTempDir();
+  const path = `${root}/book.pdf`;
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename) VALUES (?, ?, ?)",
+  ).run("Book", path, "book.pdf");
+  db.upsertReadingProgress({
+    item_id: 1,
+    status: "reading",
+    progress_percent: 42,
+    current_page: 4,
+    total_pages: 10,
+    started_at: null,
+    finished_at: null,
+    last_read_at: null,
+    updated_at: new Date().toISOString(),
+  });
+
+  const result = await scanDirectory(db, [root]);
+  assert(result.ok);
+  const item = db.getItem(1);
+  assert(item.ok);
+  if (item.ok) assertEquals(item.value.missing_at !== null, true);
+  assertEquals(db.getReadingProgress(1)?.progress_percent, 42);
+
+  db.close();
+  await Deno.remove(root, { recursive: true });
+});
+
+Deno.test("scan does not mark items under an unreadable root as missing", async () => {
+  const db = new DB(":memory:");
+  const root = `/tmp/library-root-that-does-not-exist-${crypto.randomUUID()}`;
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename) VALUES (?, ?, ?)",
+  ).run("Book", `${root}/book.pdf`, "book.pdf");
+
+  const result = await scanDirectory(db, [root]);
+  assert(result.ok);
+  const item = db.getItem(1);
+  assert(item.ok);
+  if (item.ok) assertEquals(item.value.missing_at, null);
+  db.close();
 });

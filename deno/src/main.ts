@@ -9,8 +9,11 @@ import {
   IdParamSchema,
   ItemUpdateSchema,
   ReaderPreferencesSchema,
+  ReadingProgressUpdateSchema,
   SearchQuerySchema,
   SettingsSchema,
+  BulkItemUpdateSchema,
+  BookmarkSchema,
 } from "./validate.ts";
 import { dirname, fromFileUrl, isAbsolute, join, normalize } from "@std/path";
 import { appCacheRoot, defaultScanDirectories } from "./platform.ts";
@@ -80,6 +83,12 @@ app.get("/api/search", (c) => {
     order: c.req.query("order"),
     page: c.req.query("page"),
     limit: c.req.query("limit"),
+    cursor: c.req.query("cursor"),
+    status: c.req.query("status"),
+    types: c.req.queries("type"),
+    categories: c.req.queries("category"),
+    tags: c.req.queries("tag"),
+    purposes: c.req.queries("purpose"),
   });
   if (!result.success) {
     return Response.json({ error: result.error.message }, { status: 400 });
@@ -183,6 +192,29 @@ app.put("/api/items/:id", async (c) => {
 app.delete("/api/items/:id", (c) => {
   const id = parseId(c.req.param("id"));
   return id.ok ? respond(db.deleteItem(id.value)) : respond(id);
+});
+
+app.post("/api/items/:id/restore", (c) => {
+  const id = parseId(c.req.param("id"));
+  return id.ok ? respond(db.restoreItem(id.value)) : respond(id);
+});
+
+app.delete("/api/items/:id/permanent", (c) => {
+  const id = parseId(c.req.param("id"));
+  return id.ok ? respond(db.permanentlyDeleteItem(id.value)) : respond(id);
+});
+
+app.patch("/api/items/bulk", async (c) => {
+  const parsed = BulkItemUpdateSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return Response.json({ error: parsed.error.message }, { status: 400 });
+  }
+  const result = db.bulkUpdateItems(parsed.data.ids, parsed.data.updates);
+  return respond(result);
+});
+
+app.post("/api/edits/:batch_id/undo", (c) => {
+  return respond(db.undoEdits(c.req.param("batch_id")));
 });
 
 app.on(["GET", "POST"], "/api/open/:id", (c) => {
@@ -342,9 +374,13 @@ app.get("/api/reading/progress/:id", (c) => {
 app.post("/api/reading/progress/:id", async (c) => {
   const id = parseId(c.req.param("id"));
   if (!id.ok) return respond(id);
-  const body = await c.req.json();
-  db.upsertReadingProgress({ ...body, item_id: id.value });
-  return Response.json({ status: "updated" });
+  const parsed = ReadingProgressUpdateSchema.safeParse(
+    await c.req.json().catch(() => null),
+  );
+  if (!parsed.success) {
+    return Response.json({ error: parsed.error.message }, { status: 400 });
+  }
+  return Response.json(db.recordReadingProgress(id.value, parsed.data));
 });
 
 app.post("/api/reading/start/:id", (c) => {
@@ -352,6 +388,34 @@ app.post("/api/reading/start/:id", (c) => {
   if (!id.ok) return respond(id);
   const session = db.startReadingSession(id.value);
   return Response.json(session);
+});
+
+app.post("/api/reading/heartbeat/:id", (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  return Response.json({ active: db.touchReadingSession(id.value) });
+});
+
+app.get("/api/reading/bookmarks/:id", (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  return Response.json(db.getBookmarks(id.value));
+});
+
+app.post("/api/reading/bookmarks/:id", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  const parsed = BookmarkSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return Response.json({ error: parsed.error.message }, { status: 400 });
+  return Response.json(db.addBookmark(id.value, parsed.data.location, parsed.data.label, parsed.data.percent));
+});
+
+app.delete("/api/reading/bookmarks/:id", (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  const location = c.req.query("location");
+  if (!location) return Response.json({ error: "location is required" }, { status: 400 });
+  return Response.json({ removed: db.removeBookmark(id.value, location) });
 });
 
 app.post("/api/reading/stop/:id", async (c) => {
@@ -406,6 +470,13 @@ app.post("/api/reading/finish/:id", (c) => {
   return Response.json({ status: "finished" });
 });
 
+app.post("/api/reading/drop/:id", (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  db.dropReading(id.value);
+  return Response.json({ status: "dropped" });
+});
+
 // Stub endpoints (Phase 5 integrations - not yet implemented)
 
 app.post("/api/reading/sync-focusd", () => {
@@ -428,6 +499,7 @@ app.post("/api/quit", () => {
   // The desktop shell does not reliably exit when its window closes, so
   // offer an explicit quit: respond first, then terminate the process.
   // The single-instance pidfile is removed so the next launch starts clean.
+  db.closeActiveSessions();
   setTimeout(async () => {
     try {
       await Deno.remove(pidFile);

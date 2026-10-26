@@ -38,9 +38,15 @@
     let navigating = $state(false);
     let focusMode = $state(false);
     let contents = $state<{ label: string; href: string }[]>([]);
-    let bookmarks = $state<{ cfi: string; label: string; percent: number }[]>([]);
+    let bookmarks = $state<{ id?: number; cfi: string; label: string; percent: number }[]>([]);
     let resizeObserver: ResizeObserver | null = null;
     let progressTimer: ReturnType<typeof setTimeout> | null = null;
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+    let heartbeatHandler: (() => void) | null = null;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    let activityHandler: (() => void) | null = null;
+    let resumeActivity: (() => void) | null = null;
+    let idle = $state(false);
     let mounted = true;
     let sessionStarted = false;
     let sessionStart: Promise<unknown> = Promise.resolve();
@@ -218,10 +224,17 @@
         try {
             const appSettings = await api.settings();
             settings = appSettings.reading_preferences || loadReaderPreferences();
-            const savedBookmarks = localStorage.getItem(`library:epub-bookmarks:${item.id}`);
-            if (savedBookmarks) bookmarks = JSON.parse(savedBookmarks);
         } catch {
             settings = loadReaderPreferences();
+        }
+        try {
+            const saved = await api.bookmarks(item.id);
+            bookmarks = saved.map((bookmark) => ({ id: bookmark.id, cfi: bookmark.location, label: bookmark.label, percent: bookmark.percent }));
+        } catch {
+            try {
+                const savedBookmarks = localStorage.getItem(`library:epub-bookmarks:${item.id}`);
+                if (savedBookmarks) bookmarks = JSON.parse(savedBookmarks);
+            } catch {}
         }
     }
 
@@ -298,11 +311,21 @@
         try { localStorage.setItem(`library:epub-bookmarks:${item.id}`, JSON.stringify(bookmarks)); } catch {}
     }
 
-    function toggleBookmark() {
+    async function toggleBookmark() {
         if (!currentCfi) return;
         const existing = bookmarks.findIndex((bookmark) => bookmark.cfi === currentCfi);
-        if (existing >= 0) bookmarks.splice(existing, 1);
-        else bookmarks.unshift({ cfi: currentCfi, label: currentChapter || `Page ${currentPercent}%`, percent: currentPercent });
+        if (existing >= 0) {
+            const bookmark = bookmarks[existing];
+            bookmarks.splice(existing, 1);
+            if (bookmark) await api.removeBookmark(item.id, bookmark.cfi).catch(() => {});
+        } else {
+            const created = await api.addBookmark(item.id, {
+                location: currentCfi,
+                label: currentChapter || `Page ${currentPercent}%`,
+                percent: currentPercent,
+            }).catch(() => null);
+            bookmarks.unshift({ id: created?.id, cfi: currentCfi, label: currentChapter || `Page ${currentPercent}%`, percent: currentPercent });
+        }
         bookmarks = [...bookmarks];
         saveBookmarks();
     }
@@ -322,8 +345,9 @@
         }
     }
 
-    function removeBookmark(cfi: string) {
+    async function removeBookmark(cfi: string) {
         bookmarks = bookmarks.filter((bookmark) => bookmark.cfi !== cfi);
+        await api.removeBookmark(item.id, cfi).catch(() => {});
         saveBookmarks();
     }
 
@@ -336,10 +360,12 @@
         savePosition();
         if (progressTimer) clearTimeout(progressTimer);
         progressTimer = setTimeout(() => {
-            api.readingProgress(item.id).then((progress) => api.updateProgress(item.id, {
-                ...progress,
+            api.updateProgress(item.id, {
                 progress_percent: currentPercent,
-            })).catch(() => {});
+                current_page: 0,
+                total_pages: 0,
+                location: currentCfi || null,
+            }).catch(() => {});
         }, 500);
     }
 
@@ -460,6 +486,23 @@
         sessionStart = api.startReading(item.id).then(() => {
             sessionStarted = true;
         }).catch(() => {});
+        const heartbeat = () => {
+            if (document.visibilityState === "visible" && !idle) void api.heartbeatReading(item.id).catch(() => {});
+        };
+        const markIdle = () => { idle = true; };
+        const markActive = () => {
+            idle = false;
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = setTimeout(markIdle, 5 * 60_000);
+            heartbeat();
+        };
+        activityHandler = markActive;
+        resumeActivity = markActive;
+        heartbeatTimer = setInterval(heartbeat, 30_000);
+        heartbeatHandler = () => { if (document.visibilityState === "visible") markActive(); else markIdle(); };
+        document.addEventListener("visibilitychange", heartbeatHandler);
+        for (const event of ["pointerdown", "keydown", "wheel"]) document.addEventListener(event, activityHandler);
+        markActive();
         if (!viewer) return;
         const viewerElement = viewer;
         if (isPdf) {
@@ -499,9 +542,13 @@
             if (!firstSection) throw new Error("This EPUB has no readable chapters.");
             let rawSaved = "";
             try { rawSaved = localStorage.getItem(`library:epub-position:${item.id}`) || ""; } catch {}
+            let serverLocation = "";
+            try { serverLocation = (await api.readingProgress(item.id)).location || ""; } catch {}
             // Only well-formed CFIs are worth attempting; anything else goes
             // straight to the first page instead of erroring or hanging.
-            let savedPosition = rawSaved.indexOf("epubcfi(") === 0 ? rawSaved : "";
+            const localPosition = rawSaved.indexOf("epubcfi(") === 0 ? rawSaved : "";
+            const persistedPosition = serverLocation.indexOf("epubcfi(") === 0 ? serverLocation : "";
+            let savedPosition = localPosition || persistedPosition;
             const opened = await openWithRenditionFallback({
                 timeoutMs: 6000,
                 onAttempt: ({ method, phase, elapsedMs, error: attemptError }) => {
@@ -610,6 +657,11 @@
     onDestroy(() => {
         mounted = false;
         window.removeEventListener("keydown", onKey);
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        if (heartbeatHandler) document.removeEventListener("visibilitychange", heartbeatHandler);
+        if (idleTimer) clearTimeout(idleTimer);
+        if (activityHandler) for (const event of ["pointerdown", "keydown", "wheel"]) document.removeEventListener(event, activityHandler);
+        resumeActivity = null;
         if (progressTimer) clearTimeout(progressTimer);
         resizeObserver?.disconnect();
         rendition?.destroy();
@@ -696,6 +748,13 @@
         </button>
         {/if}
     </div>
+
+    {#if idle}
+        <div class="flex items-center justify-center gap-3 px-4 py-1.5 border-b border-border bg-accent/10 text-xs text-text-secondary shrink-0" role="status">
+            <span>Reading paused after inactivity.</span>
+            <button class="rounded bg-accent px-2 py-0.5 text-white hover:bg-accent/90" onclick={() => resumeActivity?.()}>Resume</button>
+        </div>
+    {/if}
 
     <!-- Settings panel (collapsible) -->
     {#if showSettings}

@@ -2,14 +2,17 @@
   import { highlight, typeIcon } from '$lib/utils';
   import type { Item } from '$lib/api';
 
-  let { item, isSelected, query, isReading = false, progressPercent = 0, onClick, onRead }: {
+  let { item, isSelected, query, isReading = false, progressPercent = 0, bulkMode = false, isBulkSelected = false, onClick, onRead, onToggleBulk }: {
     item: Item;
     isSelected: boolean;
     query: string;
     isReading?: boolean;
     progressPercent?: number;
+    bulkMode?: boolean;
+    isBulkSelected?: boolean;
     onClick: (item: Item) => void;
     onRead?: (item: Item) => void;
+    onToggleBulk?: (item: Item) => void;
   } = $props();
 </script>
 
@@ -19,6 +22,11 @@
   class:bg-surface-2={isSelected}
 >
   <button data-item-id={item.id} class="w-full rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1" aria-pressed={isSelected} onclick={() => onClick(item)}>
+    {#if bulkMode}
+      <span class="float-right ml-2">
+        <input type="checkbox" aria-label={`Select ${item.title}`} checked={isBulkSelected} onclick={(event) => { event.stopPropagation(); onToggleBulk?.(item); }} />
+      </span>
+    {/if}
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" class="mb-1.5 text-accent/70"><path d={typeIcon(item.type)} /></svg>
     <div class="text-xs font-medium truncate leading-tight">{@html highlight(item.title, query)}</div>
     <div class="text-[10px] text-text-muted truncate mt-0.5">{item.authors || 'Unknown'}</div>

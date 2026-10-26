@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { api, type AppSettings, type Item, type Stats, type CategoryCount, type TagCount, type ReadingDashboard, type ReadingProgress, type ReadingSession, type ReadingQueueItem } from '$lib/api';
+  import { api, type AppSettings, type Item, type Stats, type CategoryCount, type TagCount, type SearchFacets, type ReadingDashboard, type ReadingProgress, type ReadingSession, type ReadingQueueItem, type ItemUpdate } from '$lib/api';
   import Sidebar from '$lib/components/Sidebar.svelte';
   import Toolbar from '$lib/components/Toolbar.svelte';
   import BookCard from '$lib/components/BookCard.svelte';
@@ -14,6 +14,9 @@
   let query = $state(''), activeType = $state(''), activeCategory = $state('');
   let activeTag = $state(''), activePurpose = $state(''), sortBy = $state('');
   let items = $state<Item[]>([]), total = $state(0), page = $state(1), totalPages = $state(1);
+  let nextCursor = $state<string | null>(null), facets = $state<SearchFacets | null>(null);
+  let bulkMode = $state(false), selectedIds = $state<number[]>([]), bulkCategory = $state('');
+  let bulkBusy = $state(false), lastBatchId = $state<string | null>(null);
   let stats = $state<Stats | null>(null);
   let categories = $state<CategoryCount[]>([]);
   let tags = $state<TagCount[]>([]);
@@ -49,8 +52,18 @@
     loading = true;
     try { const r = await api.search(query, { type: activeType || undefined, category: activeCategory || undefined,
       tag: activeTag || undefined, purpose: activePurpose || undefined, sort: sortBy || undefined, page, limit: itemsPerPage });
-      items = r.items || []; total = r.total; totalPages = r.total_pages;
+      items = r.items || []; total = r.total; totalPages = r.total_pages; nextCursor = r.next_cursor ?? null; facets = r.facets ?? null;
     } catch (e) { console.error(e); items = []; }
+    loading = false;
+  }
+  async function loadMore() {
+    if (!nextCursor || loading) return;
+    loading = true;
+    try {
+      const r = await api.search(query, { type: activeType || undefined, category: activeCategory || undefined,
+        tag: activeTag || undefined, purpose: activePurpose || undefined, sort: sortBy || undefined, limit: itemsPerPage, cursor: nextCursor });
+      items = [...items, ...(r.items || [])]; nextCursor = r.next_cursor ?? null; facets = r.facets ?? facets; total = r.total;
+    } catch (e) { console.error(e); }
     loading = false;
   }
   async function loadSidebarData() { try { const [s, c, t, p] = await Promise.all([api.stats(), api.categories(), api.tags(), api.purposes()]);
@@ -120,6 +133,25 @@
     localStorage.setItem('showPreviewPanel', String(showPreviewPanel)); }
   function setItemsPerPage(n: number) { itemsPerPage = n; page = 1;
     localStorage.setItem('itemsPerPage', String(n)); search(); }
+  function toggleBulk(item: Item) {
+    selectedIds = selectedIds.includes(item.id) ? selectedIds.filter((id) => id !== item.id) : [...selectedIds, item.id];
+  }
+  function toggleBulkMode() { bulkMode = !bulkMode; if (!bulkMode) selectedIds = []; }
+  function selectVisible() { selectedIds = selectedIds.length === items.length ? [] : items.map((item) => item.id); }
+  async function applyBulkEdit() {
+    if (!selectedIds.length || !bulkCategory || bulkBusy) return;
+    bulkBusy = true;
+    try { const result = await api.bulkUpdate(selectedIds, { category: bulkCategory } satisfies ItemUpdate); lastBatchId = result.batch_id; selectedIds = []; bulkMode = false; await search(); await loadSidebarData(); }
+    catch (e) { console.error(e); }
+    bulkBusy = false;
+  }
+  async function undoBulkEdit() {
+    if (!lastBatchId || bulkBusy) return;
+    bulkBusy = true;
+    try { await api.undoEdits(lastBatchId); lastBatchId = null; await search(); await loadSidebarData(); }
+    catch (e) { console.error(e); }
+    bulkBusy = false;
+  }
   function startResize(e: MouseEvent) {
     e.preventDefault();
     isResizing = true;
@@ -243,6 +275,16 @@
         <option value={60}>60 / page</option>
         <option value={100}>100 / page</option>
       </select>
+      <button class="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:border-accent hover:text-text-primary" class:border-accent={bulkMode} onclick={toggleBulkMode} aria-pressed={bulkMode}>Select</button>
+      {#if bulkMode}
+        <button class="rounded px-2 py-1 text-xs text-text-muted hover:bg-surface-3" onclick={selectVisible}> {selectedIds.length === items.length && items.length > 0 ? 'Clear visible' : 'Select visible'} </button>
+        <select bind:value={bulkCategory} class="bg-surface-2 border border-border rounded px-2 py-1 text-xs text-text-secondary cursor-pointer" aria-label="Bulk category">
+          <option value="">Set category…</option>
+          {#each categories as category}<option value={category.name}>{category.name}</option>{/each}
+        </select>
+        <button class="rounded bg-accent px-2 py-1 text-xs text-white disabled:opacity-40" disabled={!selectedIds.length || !bulkCategory || bulkBusy} onclick={applyBulkEdit}>Apply ({selectedIds.length})</button>
+      {/if}
+      {#if lastBatchId}<button class="rounded px-2 py-1 text-xs text-accent hover:bg-accent/10" disabled={bulkBusy} onclick={undoBulkEdit}>Undo edit</button>{/if}
       <div class="flex-1"></div>
       <span class="text-[10px] text-text-muted">{total} items</span>
     </div>
@@ -257,6 +299,17 @@
         <button class="ml-auto text-text-muted hover:text-text-primary" onclick={clearFilters}>Clear</button>
       </div>
     {/if}
+    {#if facets && (hasFilters || query)}
+      <div class="flex items-center gap-1.5 border-b border-border px-3 py-1.5 text-[10px] overflow-x-auto" aria-label="Suggested filters">
+        <span class="text-text-muted shrink-0">Refine</span>
+        {#each facets.category.slice(0, 4) as facet}
+          <button class="rounded bg-surface-2 px-1.5 py-0.5 text-text-secondary hover:bg-accent/10 hover:text-accent whitespace-nowrap" onclick={() => selectCategory(facet.name)}>{facet.name} <span class="text-text-muted">{facet.count}</span></button>
+        {/each}
+        {#each facets.tag.slice(0, 3) as facet}
+          <button class="rounded bg-surface-2 px-1.5 py-0.5 text-text-secondary hover:bg-accent/10 hover:text-accent whitespace-nowrap" onclick={() => selectTag(facet.name)}>#{facet.name} <span class="text-text-muted">{facet.count}</span></button>
+        {/each}
+      </div>
+    {/if}
     <div class="flex-1 overflow-y-auto">
       {#if loading && items.length === 0}
         <div class="p-4 text-center text-text-muted text-sm">Loading…</div>
@@ -264,14 +317,15 @@
         <div class="p-4 text-center text-text-muted text-sm">No results</div>
       {:else if view === 'list'}
         {#each items as item (item.id)}
-          <BookRow {item} isSelected={selectedItem?.id === item.id} {query} onClick={selectItem} />
+          <BookRow {item} isSelected={selectedItem?.id === item.id} {query} {bulkMode} isBulkSelected={selectedIds.includes(item.id)} onToggleBulk={toggleBulk} onClick={selectItem} />
         {/each}
       {:else}
         <div class="grid grid-cols-2 gap-2 p-2">
           {#each items as item (item.id)}
           <BookCard {item} isSelected={selectedItem?.id === item.id} {query}
-            isReading={!!dashboard?.currently_reading.some((entry) => entry.item.id === item.id)}
-            progressPercent={dashboard?.currently_reading.find((entry) => entry.item.id === item.id)?.progress.progress_percent || 0}
+            {bulkMode} isBulkSelected={selectedIds.includes(item.id)} onToggleBulk={toggleBulk}
+            isReading={item.progress?.status === 'reading' || !!dashboard?.currently_reading.some((entry) => entry.item.id === item.id)}
+            progressPercent={item.progress?.progress_percent ?? dashboard?.currently_reading.find((entry) => entry.item.id === item.id)?.progress.progress_percent ?? 0}
             onClick={selectItem} onRead={continueReading} />
           {/each}
         </div>
@@ -284,6 +338,13 @@
           <button class="px-2 py-0.5 rounded hover:bg-surface-3 disabled:opacity-30" disabled={page <= 1} onclick={() => { page--; search(); }}>Prev</button>
           <button class="px-2 py-0.5 rounded hover:bg-surface-3 disabled:opacity-30" disabled={page >= totalPages} onclick={() => { page++; search(); }}>Next</button>
         </div>
+      </div>
+    {/if}
+    {#if nextCursor}
+      <div class="border-t border-border px-3 py-2 text-center">
+        <button class="rounded bg-surface-2 px-3 py-1 text-xs text-text-secondary hover:bg-accent/10 hover:text-accent disabled:opacity-40" disabled={loading} onclick={loadMore}>
+          {loading ? 'Loading…' : `Load more · ${items.length} of ${total}`}
+        </button>
       </div>
     {/if}
   </div>

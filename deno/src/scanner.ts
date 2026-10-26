@@ -1,4 +1,4 @@
-import { basename, extname, join } from "@std/path";
+import { basename, extname, join, normalize, relative } from "@std/path";
 import type { BookType, Item } from "./types.ts";
 import type { Result } from "./result.ts";
 import { AppError, Err, Ok } from "./result.ts";
@@ -187,7 +187,7 @@ function guessType(path: string, filename: string): BookType {
   return "book";
 }
 
-function cleanTitleFromFirstPage(text: string): string {
+export function extractTitleFromFirstPageText(text: string): string {
   const lines = text.split("\n");
   let arxivIdx = -1;
   for (let i = 0; i < lines.length; i++) {
@@ -221,6 +221,9 @@ function cleanTitleFromFirstPage(text: string): string {
     if (isBadMetadata(trimmed)) continue;
     if (SKIP_LINE.test(trimmed)) continue;
     if (looksLikeAffiliation(trimmed)) continue;
+    // A continuation line such as "& Engineering" is not a title. Requiring
+    // an uppercase letter or digit also avoids accepting sentence fragments.
+    if (!/^[A-Z0-9]/.test(trimmed)) continue;
     if (hasAuthorMarker(trimmed)) continue;
     if (trimmed.length < 10 || trimmed.length > 300) continue;
     return trimmed.replace(/[.,;:]+$/, "");
@@ -314,7 +317,7 @@ export async function extractEPUBMetadata(
 export async function extractTitleFromFirstPage(path: string): Promise<string> {
   try {
     const text = await runCommand("pdftotext", ["-l", "1", path, "-"]);
-    return cleanTitleFromFirstPage(text);
+    return extractTitleFromFirstPageText(text);
   } catch {
     return "";
   }
@@ -334,12 +337,21 @@ export async function extractPDF(
 
   let { title, author, subject } = await extractPDFMetadata(path);
   title = cleanMetadata(title);
+  let titleSource: Item["title_source"] = "metadata";
   if (isBadMetadata(title)) {
     title = cleanMetadata(await extractTitleFromFirstPage(path));
+    titleSource = "first_page";
   }
-  if (isBadMetadata(title)) title = extractTitle(filename);
-  if (isBadMetadata(title)) title = titleCaseFilename(filename);
+  if (isBadMetadata(title)) {
+    title = extractTitle(filename);
+    titleSource = "filename";
+  }
+  if (isBadMetadata(title)) {
+    title = titleCaseFilename(filename);
+    titleSource = "filename";
+  }
   item.title = title;
+  item.title_source = titleSource;
 
   author = cleanMetadata(author);
   if (author && !isBadMetadata(author)) {
@@ -606,20 +618,22 @@ export async function scanDirectory(
     // Collect all files on disk (recursive, max depth 10)
     const diskPaths = new Set<string>(); // full paths on disk
     const diskByName = new Map<string, string[]>(); // filename → [paths]
-    async function scanDir(dir: string, depth = 0) {
-      if (depth > 10) return;
+    const successfulRoots = new Set<string>();
+    async function scanDir(dir: string, depth = 0): Promise<boolean> {
+      if (depth > 10) return true;
+      let healthy = true;
       try {
         for await (const entry of Deno.readDir(dir)) {
           if (entry.name.startsWith(".")) continue;
           const fullPath = join(dir, entry.name);
           if (entry.isDirectory) {
-            await scanDir(fullPath, depth + 1);
+            if (!await scanDir(fullPath, depth + 1)) healthy = false;
           } else if (entry.isFile || entry.isSymlink) {
             // For symlinks, stat to resolve target
             try {
               const stat = await Deno.stat(fullPath);
               if (stat.isDirectory) {
-                await scanDir(fullPath, depth + 1);
+                if (!await scanDir(fullPath, depth + 1)) healthy = false;
                 continue;
               }
             } catch {
@@ -635,12 +649,25 @@ export async function scanDirectory(
           }
         }
       } catch {
-        // Skip directories we can't read (permission denied, etc.)
+        // A partially unreadable root is not safe for missing-file decisions.
+        healthy = false;
       }
+      return healthy;
     }
     for (const dir of dirs) {
-      await scanDir(dir);
+      if (await scanDir(dir)) successfulRoots.add(normalize(dir));
     }
+
+    const isUnderSuccessfulRoot = (path: string): boolean => {
+      const normalized = normalize(path);
+      for (const root of successfulRoots) {
+        const rel = relative(root, normalized);
+        if (rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"))) {
+          return true;
+        }
+      }
+      return false;
+    };
 
     // Check each DB item
     const dbItems = db.getAllItems();
@@ -657,6 +684,7 @@ export async function scanDirectory(
 
     // Second pass: handle missing files
     for (const item of dbItems) {
+      if (item.ignored || !isUnderSuccessfulRoot(item.path)) continue;
       if (claimed.has(item.path)) continue;
 
       // Try to find by filename only (first unclaimed match)
@@ -665,11 +693,11 @@ export async function scanDirectory(
       const match = candidates.find((p) => !claimed.has(p));
 
       if (match) {
-        db.updatePath(item.id, match);
+        db.restorePath(item.id, match);
         claimed.add(match);
         moved++;
       } else {
-        db.deleteItem(item.id);
+        db.markMissing(item.id);
         removed++;
       }
     }
@@ -700,8 +728,15 @@ export async function scanDirectory(
         item.title = epub.title
           ? cleanMetadata(epub.title)
           : extractTitle(filename);
-        if (isBadMetadata(item.title)) item.title = extractTitle(filename);
-        if (isBadMetadata(item.title)) item.title = titleCaseFilename(filename);
+        item.title_source = epub.title ? "metadata" : "filename";
+        if (isBadMetadata(item.title)) {
+          item.title = extractTitle(filename);
+          item.title_source = "filename";
+        }
+        if (isBadMetadata(item.title)) {
+          item.title = titleCaseFilename(filename);
+          item.title_source = "filename";
+        }
         item.authors = epub.author || extractAuthors(filename);
         if (epub.description) {
           item.description = cleanMetadata(epub.description);
@@ -710,6 +745,7 @@ export async function scanDirectory(
       } else {
         item = parseFile(path);
         item.title = extractTitle(filename);
+        item.title_source = "filename";
         item.authors = extractAuthors(filename);
       }
 

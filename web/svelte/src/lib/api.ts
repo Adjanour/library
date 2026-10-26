@@ -16,6 +16,7 @@ export interface Item {
   description: string;
   size: number;
   added_at: string;
+  progress?: ReadingProgress | null;
 }
 
 export interface ItemUpdate {
@@ -44,6 +45,15 @@ export interface SearchResult {
   page: number;
   limit: number;
   total_pages: number;
+  next_cursor?: string | null;
+  facets?: SearchFacets;
+}
+
+export interface SearchFacets {
+  category: CategoryCount[];
+  tag: TagCount[];
+  purpose: TagCount[];
+  type: TagCount[];
 }
 
 export interface Stats {
@@ -69,6 +79,23 @@ export interface ReadingProgress {
   started_at: string;
   finished_at: string;
   last_read_at: string;
+  location?: string | null;
+}
+
+export interface ReadingProgressUpdate {
+  progress_percent: number;
+  current_page: number;
+  total_pages: number;
+  location?: string | null;
+}
+
+export interface Bookmark {
+  id: number;
+  item_id: number;
+  location: string;
+  label: string;
+  percent: number;
+  created_at: string;
 }
 
 export interface ReadingSession {
@@ -78,6 +105,7 @@ export interface ReadingSession {
   ended_at: string;
   duration_seconds: number;
   pages_read: number;
+  last_activity_at: string | null;
 }
 
 export interface ReadingQueueItem {
@@ -134,17 +162,29 @@ async function put<T>(path: string, body: unknown): Promise<T> {
   return res.json();
 }
 
+async function patch<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(API + path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
 export const api = {
-  search: (q: string, opts?: { type?: string; category?: string; tag?: string; purpose?: string; sort?: string; page?: number; limit?: number }) => {
+  search: (q: string, opts?: { type?: string | string[]; category?: string | string[]; tag?: string | string[]; purpose?: string | string[]; status?: string; sort?: string; page?: number; limit?: number; cursor?: string }) => {
     const params = new URLSearchParams();
     if (q) params.set('q', q);
-    if (opts?.type) params.set('type', opts.type);
-    if (opts?.category) params.set('category', opts.category);
-    if (opts?.tag) params.set('tag', opts.tag);
-    if (opts?.purpose) params.set('purpose', opts.purpose);
+    for (const [key, value] of Object.entries({ type: opts?.type, category: opts?.category, tag: opts?.tag, purpose: opts?.purpose })) {
+      if (Array.isArray(value)) value.filter(Boolean).forEach((entry) => params.append(key, entry));
+      else if (value) params.set(key, value);
+    }
+    if (opts?.status) params.set('status', opts.status);
     if (opts?.sort) params.set('sort', opts.sort);
     if (opts?.page) params.set('page', String(opts.page));
     if (opts?.limit) params.set('limit', String(opts.limit));
+    if (opts?.cursor) params.set('cursor', opts.cursor);
     return get<SearchResult>('/api/search?' + params);
   },
   stats: () => get<Stats>('/api/stats'),
@@ -152,6 +192,8 @@ export const api = {
   open: (id: number) => post(`/api/open/${id}`),
   item: (id: number) => get<Item>(`/api/items/${id}`),
   updateItem: (id: number, updates: ItemUpdate) => put<Item>(`/api/items/${id}`, updates),
+  bulkUpdate: (ids: number[], updates: ItemUpdate) => patch<{ batch_id: string; updated: number }>('/api/items/bulk', { ids, updates }),
+  undoEdits: (batchId: string) => post<{ restored: number }>(`/api/edits/${batchId}/undo`),
   delete: (id: number) => del(`/api/items/${id}`),
   scan: () => post<{ indexed: number; total: number }>('/api/scan'),
   settings: () => get<AppSettings>('/api/settings'),
@@ -164,11 +206,15 @@ export const api = {
 
   // Reading progress
   readingProgress: (id: number) => get<ReadingProgress>(`/api/reading/progress/${id}`),
-  updateProgress: (id: number, progress: Partial<ReadingProgress>) => post(`/api/reading/progress/${id}`, progress),
+  updateProgress: (id: number, progress: ReadingProgressUpdate) => post<ReadingProgress>(`/api/reading/progress/${id}`, progress),
   readingDashboard: () => get<ReadingDashboard>('/api/reading/dashboard'),
 
   // Reading sessions
   startReading: (id: number) => post<ReadingSession>(`/api/reading/start/${id}`),
+  heartbeatReading: (id: number) => post<{ active: boolean }>(`/api/reading/heartbeat/${id}`),
+  bookmarks: (id: number) => get<Bookmark[]>(`/api/reading/bookmarks/${id}`),
+  addBookmark: (id: number, bookmark: Pick<Bookmark, 'location' | 'label' | 'percent'>) => post<Bookmark>(`/api/reading/bookmarks/${id}`, bookmark),
+  removeBookmark: (id: number, location: string) => del<{ removed: boolean }>(`/api/reading/bookmarks/${id}?location=${encodeURIComponent(location)}`),
   stopReading: (id: number, pagesRead?: number) => post(`/api/reading/stop/${id}`, { pages_read: pagesRead || 0 }),
   readingSessions: (id: number) => get<ReadingSession[]>(`/api/reading/sessions/${id}`),
 
@@ -180,6 +226,7 @@ export const api = {
 
   // Finish & sync
   finishReading: (id: number) => post(`/api/reading/finish/${id}`),
+  dropReading: (id: number) => post(`/api/reading/drop/${id}`),
   syncFocusd: () => post<{ added: number }>('/api/reading/sync-focusd'),
 
   // Readest sync

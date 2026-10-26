@@ -17,6 +17,10 @@ export interface Item {
   size: number;
   added_at: string;
   updated_at: string;
+  title_source?: "metadata" | "first_page" | "filename" | "manual";
+  locked_fields?: string;
+  missing_at?: string | null;
+  ignored?: number;
 }
 
 export interface ItemUpdate {
@@ -35,22 +39,41 @@ export interface ItemUpdate {
 export interface SearchQuery {
   q: string;
   type: string;
+  types?: string[];
   category: string;
+  categories?: string[];
   tag: string;
+  tags?: string[];
   purpose: string;
+  purposes?: string[];
+  status?: string;
   year: number;
   sort: string;
   order: string;
   page: number;
   limit: number;
+  cursor?: string;
 }
 
 export interface SearchResult {
-  items: Item[];
+  items: SearchItem[];
   total: number;
   page: number;
   limit: number;
   total_pages: number;
+  next_cursor?: string | null;
+  facets?: SearchFacets;
+}
+
+export interface SearchFacets {
+  type: TagCount[];
+  category: TagCount[];
+  purpose: TagCount[];
+  tag: TagCount[];
+}
+
+export interface SearchItem extends Item {
+  progress: ReadingProgress | null;
 }
 
 // Statistics
@@ -79,7 +102,13 @@ export interface AppSettings {
 
 // Reading
 
-export type ReadingStatus = "unread" | "reading" | "finished" | "abandoned";
+export type ReadingStatus =
+  | "unread"
+  | "queued"
+  | "reading"
+  | "finished"
+  | "dropped"
+  | "abandoned";
 
 export interface ReadingProgress {
   item_id: number;
@@ -91,6 +120,23 @@ export interface ReadingProgress {
   finished_at: string | null;
   last_read_at: string | null;
   updated_at: string;
+  location?: string | null;
+}
+
+export interface ReadingProgressUpdate {
+  progress_percent: number;
+  current_page: number;
+  total_pages: number;
+  location?: string | null;
+}
+
+export interface Bookmark {
+  id: number;
+  item_id: number;
+  location: string;
+  label: string;
+  percent: number;
+  created_at: string;
 }
 
 export interface ReadingSession {
@@ -100,6 +146,7 @@ export interface ReadingSession {
   ended_at: string | null;
   duration_seconds: number;
   pages_read: number;
+  last_activity_at: string | null;
 }
 
 export interface ReadingQueueItem {

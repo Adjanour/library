@@ -21,6 +21,19 @@ export const SearchQuerySchema = z.object({
   order: z.string().default(""),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().optional(),
+  status: z.string().default(""),
+  types: z.array(z.string()).optional(),
+  categories: z.array(z.string()).optional(),
+  tags: z.array(z.string()).optional(),
+  purposes: z.array(z.string()).optional(),
+});
+
+export const BulkItemUpdateSchema = z.object({
+  ids: z.array(z.number().int().positive()).min(1).max(1000),
+  updates: ItemUpdateSchema.refine((value) => Object.keys(value).length > 0, {
+    message: "updates must contain at least one field",
+  }),
 });
 
 export const IdParamSchema = z.object({
@@ -29,6 +42,46 @@ export const IdParamSchema = z.object({
 
 export const SettingsSchema = z.object({
   scan_directories: z.array(z.string().trim().min(1)).min(1).max(20),
+});
+
+export const ReadingProgressSchema = z.object({
+  status: z.enum(["unread", "queued", "reading", "finished", "dropped", "abandoned"]),
+  progress_percent: z.number().int().min(0).max(100),
+  current_page: z.number().int().min(0),
+  total_pages: z.number().int().min(0),
+  started_at: z.string().nullable().optional(),
+  finished_at: z.string().nullable().optional(),
+  last_read_at: z.string().nullable().optional(),
+  updated_at: z.string().optional(),
+}).superRefine((value, ctx) => {
+  if (value.total_pages > 0 && value.current_page > value.total_pages) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["current_page"],
+      message: "current_page cannot exceed total_pages",
+    });
+  }
+});
+
+export const ReadingProgressUpdateSchema = z.object({
+  progress_percent: z.number().int().min(0).max(100),
+  current_page: z.number().int().min(0),
+  total_pages: z.number().int().min(0),
+  location: z.string().max(1000).nullable().optional(),
+}).superRefine((value, ctx) => {
+  if (value.total_pages > 0 && value.current_page > value.total_pages) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["current_page"],
+      message: "current_page cannot exceed total_pages",
+    });
+  }
+});
+
+export const BookmarkSchema = z.object({
+  location: z.string().trim().min(1).max(1000),
+  label: z.string().trim().max(300).default(""),
+  percent: z.number().int().min(0).max(100),
 });
 
 export const ReaderPreferencesSchema = z.object({
