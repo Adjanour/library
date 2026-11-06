@@ -2,6 +2,12 @@
 
 All notable changes to Library are documented here.
 
+## [0.2.1] - 2026-11-06
+
+### Fixed
+
+- The packaged EPUB smoke harness opens its seeded fixture again: the Dashboard home route restored the `smoke_item_id` reader handoff that previously lived on the old library home route, so CI's launch validation no longer times out waiting for rendition diagnostics.
+
 ## [0.2.0] - 2026-11-06
 
 ### Added

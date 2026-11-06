@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { api, type ContentIndexStats, type ReadingDashboard, type Stats } from '$lib/api';
 
@@ -14,6 +15,10 @@
 
   onMount(async () => {
     try {
+      // The packaged EPUB smoke harness boots the app at the home route and
+      // expects the seeded fixture to open in the reader without interaction.
+      const settings = await api.settings();
+      if (settings.smoke_item_id) void goto(`/reader/${settings.smoke_item_id}`);
       [reading, stats, index] = await Promise.all([api.readingDashboard(), api.stats(), api.contentIndexStats()]);
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'Could not load your library overview.';
