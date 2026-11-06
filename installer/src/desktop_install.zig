@@ -190,7 +190,8 @@ fn writeLauncher(io: std.Io, allocator: std.mem.Allocator, root: std.Io.Dir, roo
         .linux => try writer.interface.writeAll(
             "#!/bin/sh\n" ++
                 "set -eu\n" ++
-                "ROOT=$(CDPATH= cd -- \"$(dirname -- \"$0\")/../..\" && pwd)\n" ++
+                "SELF=$(readlink -f -- \"$0\")\n" ++
+                "ROOT=$(CDPATH= cd -- \"$(dirname -- \"$SELF\")/../..\" && pwd)\n" ++
                 "VERSION=$(cat \"$ROOT/desktop/current.txt\")\n" ++
                 "APP_ROOT=\"$ROOT/desktop/versions/$VERSION/app\"\n" ++
                 "cd \"$APP_ROOT\"\n" ++
