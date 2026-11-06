@@ -147,7 +147,7 @@ The desktop build uses CEF so EPUB rendering is consistent across platforms. Lin
 - [Preview testing](docs/preview-testing.md) — shareable checklist for Windows, macOS, and Linux testers.
 - [Deno Desktop reference](deno/DESKTOP.md) — runtime architecture and configuration.
 
-Metadata extraction currently uses Poppler tools (`pdfinfo`, `pdftotext`) and `unzip` when available. Missing tools degrade to filename metadata rather than preventing the library or in-app readers from working.
+Metadata extraction currently uses Poppler tools (`pdfinfo`, `pdftotext`) and `unzip` when available. The scanner validates DOI, ISBN, and arXiv identifiers, stores per-field source and confidence evidence, and fingerprints file contents so renamed copies can be recovered safely. The first scan after the metadata schema upgrade backfills existing records. Missing tools degrade to filename metadata rather than preventing the library or in-app readers from working.
 
 ## Architecture
 
@@ -163,7 +163,10 @@ docs/                 Setup, packaging, installer, release, and archived guides
 
 The desktop app uses Deno Desktop with the CEF backend. This keeps EPUB
 rendering consistent across Linux, Windows, and macOS build targets. The Go
-server remains useful for the web and TUI workflows.
+server and TUI are compatibility-only and deprecated. They remain in the
+repository so existing workflows can migrate safely, but new reading, queue,
+desktop, and lifecycle behavior belongs in the Deno runtime. Do not expand the
+Go implementation while Deno parity and migration validation are in progress.
 
 ## Contributing
 

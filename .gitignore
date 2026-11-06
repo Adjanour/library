@@ -5,6 +5,8 @@ dist/
 web/static/
 web/svelte/.svelte-kit/
 web/svelte/build/
-library
+# Root-anchored: the bare `library` form also matched src/routes/library,
+# which made Tailwind skip scanning that entire route tree.
+/library/
 installer/.zig-cache/
 installer/zig-out/

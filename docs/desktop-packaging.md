@@ -12,6 +12,21 @@ deno task --cwd deno desktop
 
 The output is `dist/app/`; the executable is `dist/app/app`.
 
+## Development mode
+
+Use the native desktop shell during development instead of repeatedly packaging
+and installing builds:
+
+```bash
+deno task --cwd deno dev:desktop
+```
+
+This starts Vite at `127.0.0.1:5173`, proxies client assets through the local
+Library runtime, and starts Deno Desktop with `--hmr`. Svelte changes hot-reload
+in the native window; Deno module changes restart through Desktop HMR. Stop the
+command with `Ctrl-C`; it also stops Vite. Production-style testing remains the
+signed `install-desktop` workflow.
+
 Validate the packaged binary under a virtual display:
 
 ```bash

@@ -65,15 +65,15 @@ The session model now has an activity timestamp, a 30-second heartbeat while the
 
 ### Positions and bookmarks were origin-local today
 
-PDF pages, EPUB CFIs, and EPUB bookmarks were stored in `localStorage`. They are scoped to the browser origin, so the web preview, desktop preview, and different local ports did not share them. EPUB CFIs and bookmarks now have durable database storage; PDF page persistence remains the next format-neutral position slice.
+PDF pages, EPUB CFIs, and EPUB bookmarks were stored in `localStorage`. They are scoped to the browser origin, so the web preview, desktop preview, and different local ports did not share them. EPUB CFIs, PDF page locations, and bookmarks now have durable database storage, with local storage retained as a fast cache.
 
-The durable model now stores an optional resume location in `reading_progress`, and EPUB bookmarks live in the SQLite `bookmarks` table. Local storage remains a short-lived write-through cache for faster startup and compatibility with older data, but it is no longer the only source of truth.
+The durable model now stores an optional format-specific resume location in `reading_progress`, and EPUB bookmarks live in the SQLite `bookmarks` table. Local storage remains a short-lived write-through cache for faster startup and compatibility with older data, but it is no longer the only source of truth.
 
 ### Diagnostics are too visible in production
 
-EPUB reader failures currently include the internal `epub-trace-7` build marker, raw probe results, and trace milestones in the user-facing error string. The iframe probe is useful during diagnosis, but it should not be part of the normal production error path.
+EPUB reader failures previously included the internal build marker, raw probe results, and trace milestones in the user-facing error string. The iframe probe remains useful during diagnosis, but it is no longer part of the normal production error path.
 
-The reader should show a short recovery message and provide a `Copy diagnostics` action. Detailed traces should be retained behind a diagnostics flag and sent to the existing diagnostics endpoint only when enabled.
+The reader now shows a short recovery message and provides a `Copy diagnostics` action. Detailed traces remain in the diagnostics report while the normal error surface stays concise.
 
 ### Reader controls need format-specific scope
 
@@ -121,7 +121,7 @@ The redesign replaces the earlier non-goal of “readers unchanged” with:
 - Two concurrent progress updates cannot restore `reading` after a finish transition.
 - Moving backwards changes the resume location but never lowers furthest progress.
 - Closing, crashing, or force-killing the app cannot leave a session active indefinitely.
-- Restarting the web or desktop app restores the same EPUB CFI from SQLite; PDF page persistence remains a separate acceptance gate.
+- Restarting the web or desktop app restores the same EPUB CFI and PDF page location from SQLite.
 - EPUB percentage is non-zero after locations are generated and a relocation event occurs.
 - User-facing EPUB failures do not expose raw traces; copied diagnostics still include enough detail to debug the engine.
 - PDF memory and first-paint measurements are recorded for representative small and large documents.

@@ -72,3 +72,11 @@ Keep unrelated formatting or generated build output out of the change. Do not co
 - Do not add `Co-Authored-By` trailers unless explicitly requested.
 - Keep releases honest: preview artifacts must say preview, and certified platform support requires native validation plus signing requirements.
 - Never commit production installer signing keys or embed secrets in manifests.
+
+## Go compatibility boundary
+
+The Go server and TUI are frozen compatibility surfaces. Keep them compiling
+and tested, but do not add new reading, queue, desktop, or lifecycle behavior
+there. New product behavior must use the Deno runtime and its shared HTTP API;
+the Go implementation will be removed only after Deno parity and migration
+validation are complete.

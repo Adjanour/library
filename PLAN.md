@@ -42,6 +42,12 @@ Implemented in the current working slice:
 - Search ordering has a stable `id` tiebreaker and excludes ignored items.
 - Reading progress input is validated at the API boundary.
 - First-page title extraction rejects continuation lines and records title provenance.
+- Metadata schema version 7 stores publisher, language, DOI, ISBN, arXiv ID,
+  SHA-256 content fingerprints, and per-field source/confidence evidence.
+- Renamed files can be reconciled by content rather than filename alone, and
+  related copies can be queried without deleting either file.
+- FTS5 search ranks matches with weighted BM25, exact-title and identifier
+  boosts, and returns a matching snippet instead of sorting matches only by title.
 
 The migration fixture and API-level regression coverage for these behaviors are now in place.
 
@@ -75,8 +81,7 @@ Implemented in the completed Phase 1 API slice:
 
 Still outstanding in this phase:
 
-- Queue-to-reading promotion behavior and the redesigned route structure.
-- A format-neutral PDF resume value shared across web and desktop origins.
+- The redesigned route structure.
 
 ### 2. Native desktop validation
 
@@ -100,9 +105,11 @@ Still outstanding in this phase:
 
 - The reader findings and proposed state model are recorded in [`docs/design/reader-redesign.md`](docs/design/reader-redesign.md).
 - Client progress writes now use one atomic server update that derives status and preserves furthest progress.
-- EPUB resume locations and bookmarks are durable in SQLite; local storage remains a cache. PDF resume still needs to move fully to the same durable model.
+- EPUB and PDF resume locations, plus EPUB bookmarks, are durable in SQLite; local storage remains a fast cache.
 - Session heartbeat, active-time accumulation, visibility or idle handling, orphan cleanup, and shutdown-time session closure are implemented.
-- Hide iframe probes and raw EPUB traces behind diagnostics mode with a copyable diagnostics action.
+- Raw EPUB traces are hidden from normal errors; the reader offers a copyable diagnostics payload while retaining detailed reports for the diagnostics endpoint.
+- Queue status is synchronized with reading status, finishing returns the next queued item, and the reader automatically opens it.
+- Queue removal is confirmed in the dashboard and resets an intentionally queued book to `unread`.
 - Treat the native desktop window-close lifecycle as a separate Deno Desktop integration issue. `Super + W` closes the Hyprland window, but the current backend may survive until explicit `/api/quit`.
 - Re-test the diagnostic path against real-world EPUBs that previously failed in the webview.
 - Keep EPUB opening under one second for warmed books and measure cold-start stages.
