@@ -1,0 +1,1 @@
+<script lang="ts">import EmptyState from '$lib/components/EmptyState.svelte';</script><EmptyState title="Recent activity will appear here" message="Recently opened and changed items use the same durable reading state as the reader." />

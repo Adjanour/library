@@ -20,7 +20,7 @@
     }: {
         item: { id: number; title: string; filename: string };
         onClose: () => void;
-        onFinished?: () => void;
+        onFinished?: (nextItemId?: number) => void;
     } = $props();
     let isPdf = $derived(item.filename.toLowerCase().endsWith(".pdf"));
 
@@ -34,11 +34,15 @@
     let currentCfi = $state("");
     let currentChapter = $state("");
     let showSettings = $state(false);
-    let showPanel = $state<"contents" | "bookmarks" | null>(null);
+    let showPanel = $state<"contents" | "bookmarks" | "search" | "highlights" | null>(null);
     let navigating = $state(false);
     let focusMode = $state(false);
     let contents = $state<{ label: string; href: string }[]>([]);
     let bookmarks = $state<{ id?: number; cfi: string; label: string; percent: number }[]>([]);
+    let annotations = $state<{ id: number; cfi_range: string; text: string; note: string; created_at: string }[]>([]);
+    let searchQuery = $state("");
+    let searchResults = $state<{ cfi: string; excerpt: string }[]>([]);
+    let searching = $state(false);
     let resizeObserver: ResizeObserver | null = null;
     let progressTimer: ReturnType<typeof setTimeout> | null = null;
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -51,13 +55,13 @@
     let sessionStarted = false;
     let sessionStart: Promise<unknown> = Promise.resolve();
     let loadingStage = $state("Opening book…");
-    // Bumped on every reader change so a screenshot of the error text
-    // identifies exactly which build produced it.
-    const READER_BUILD = "epub-trace-7";
-    // Milestones reached during open; appended to any error so a failure
-    // can be localized (parse vs iframe-load vs layout) from a screenshot.
+    const READER_BUILD = "epub-reader-8";
+    // Milestones are retained for diagnostics, but are not shown in normal
+    // reader errors. This keeps recovery messages useful and non-technical.
     let trace: string[] = [];
     let traceT0 = 0;
+    let diagnosticText = $state("");
+    let copiedDiagnostics = $state(false);
     function report(event: string, detail: Record<string, unknown> = {}) {
         void api.epubDiagnostic({
             event,
@@ -74,8 +78,26 @@
         report("milestone", { step });
     }
     function fail(message: string) {
-        error = `${message} [trace: ${trace.join("→") || "none"}] [build ${READER_BUILD}]`;
+        diagnosticText = JSON.stringify({
+            build: READER_BUILD,
+            item_id: item.id,
+            message,
+            trace,
+            user_agent: navigator.userAgent,
+        }, null, 2);
+        error = "Unable to open this EPUB. Try reopening it. If the problem continues, copy diagnostics and report it.";
         report("failure", { message, trace });
+    }
+
+    async function copyDiagnostics() {
+        try {
+            await navigator.clipboard.writeText(diagnosticText);
+            copiedDiagnostics = true;
+            setTimeout(() => copiedDiagnostics = false, 2000);
+        } catch {
+            copiedDiagnostics = false;
+        }
+        annotations = await api.annotations(item.id).catch(() => []);
     }
 
     function renditionDomState(viewerElement: HTMLDivElement) {
@@ -181,7 +203,7 @@
     function maybeFinishReading() {
         if (finishSent || currentPercent < 100) return;
         finishSent = true;
-        void api.finishReading(item.id).then(() => onFinished?.()).catch(() => {
+        void api.finishReading(item.id).then((result) => onFinished?.(result.next_item_id ?? undefined)).catch(() => {
             finishSent = false;
         });
     }
@@ -292,11 +314,42 @@
         saveSettings();
     }
 
-    function togglePanel(panel: "contents" | "bookmarks") {
+    function togglePanel(panel: "contents" | "bookmarks" | "search" | "highlights") {
         // PDFs have their own toolbar/panels inside PdfReader.
         if (isPdf) return;
         showSettings = false;
         showPanel = showPanel === panel ? null : panel;
+    }
+
+    function addHighlight(cfiRange: string, text: string) {
+        if (!rendition || annotations.some((annotation) => annotation.cfi_range === cfiRange)) return;
+        rendition.annotations.highlight(cfiRange, { text }, undefined, "library-highlight", { fill: "#f5c542", "fill-opacity": "0.38" });
+    }
+    async function saveHighlight(cfiRange: string) {
+        if (!book) return;
+        const range = await book.getRange(cfiRange).catch(() => null);
+        const text = range?.toString()?.trim() || "Highlighted passage";
+        const saved = await api.addAnnotation(item.id, { cfi_range: cfiRange, text, note: "" });
+        annotations = [saved, ...annotations.filter((annotation) => annotation.cfi_range !== cfiRange)];
+        addHighlight(cfiRange, text);
+    }
+    async function removeHighlight(cfiRange: string) {
+        await api.removeAnnotation(item.id, cfiRange);
+        rendition?.annotations.remove(cfiRange, "highlight");
+        annotations = annotations.filter((annotation) => annotation.cfi_range !== cfiRange);
+    }
+    async function searchBook() {
+        const query = searchQuery.trim();
+        if (!book || !query) { searchResults = []; return; }
+        searching = true;
+        try {
+            const groups = await Promise.all(book.spine.spineItems.map(async (spine: any) => {
+                await spine.load(book.load.bind(book));
+                try { return spine.find(query); } finally { spine.unload(); }
+            }));
+            searchResults = groups.flat().slice(0, 100).map((entry: any) => ({ cfi: entry.cfi, excerpt: entry.excerpt || query }));
+        } catch { searchResults = []; }
+        finally { searching = false; }
     }
 
     function toggleFocusMode() {
@@ -586,6 +639,10 @@
                     candidate.on("rendered", () => {
                         if (mounted && rendition === candidate) note("rendered");
                     });
+                    candidate.on("selected", (cfiRange: string, contents: any) => {
+                        void saveHighlight(cfiRange);
+                        contents?.window?.getSelection?.().removeAllRanges();
+                    });
                     try { candidate.hooks.content.register(() => note("rendition-content")); } catch {}
                     return candidate;
                 },
@@ -608,6 +665,7 @@
                 },
             });
             rendition = opened.rendition;
+            for (const annotation of annotations) addHighlight(annotation.cfi_range, annotation.text);
             // NOTE: this @intity/epub-js fork has no book.ready promise
             // (the original epubjs does) — navigation is awaited explicitly.
             book.loaded.navigation.then(() => {
@@ -697,6 +755,8 @@
         >
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="18" x2="20" y2="18" /></svg>
         </button>
+        <button class="p-1.5 rounded hover:bg-surface-3 transition-colors" class:bg-surface-3={showPanel === "search"} title="Find in book" aria-label="Find in book" onclick={() => togglePanel("search")}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg></button>
+        <button class="p-1.5 rounded hover:bg-surface-3 transition-colors" class:bg-surface-3={showPanel === "highlights"} title="Highlights" aria-label="Highlights" onclick={() => togglePanel("highlights")}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 11 6-6 4 4-6 6"/><path d="m5 19 4-4"/><path d="M4 21h16"/></svg></button>
         <button
             class="p-1.5 rounded hover:bg-surface-3 transition-colors shrink-0"
             class:bg-surface-3={showPanel === "bookmarks" || isBookmarked()}
@@ -861,8 +921,8 @@
         <aside class="absolute top-0 bottom-0 left-0 z-30 w-80 max-w-[88vw] border-r border-border bg-surface-1 shadow-2xl flex flex-col">
             <div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
                 <div>
-                    <div class="text-sm font-medium">{showPanel === "contents" ? "Contents" : "Bookmarks"}</div>
-                    <div class="text-[10px] text-text-muted">{showPanel === "contents" ? `${contents.length} sections` : `${bookmarks.length} saved`}</div>
+                    <div class="text-sm font-medium">{showPanel === "contents" ? "Contents" : showPanel === "bookmarks" ? "Bookmarks" : showPanel === "search" ? "Find in book" : "Highlights"}</div>
+                    <div class="text-[10px] text-text-muted">{showPanel === "contents" ? `${contents.length} sections` : showPanel === "bookmarks" ? `${bookmarks.length} saved` : showPanel === "highlights" ? `${annotations.length} saved` : "Search all chapters"}</div>
                 </div>
                 <button class="p-1.5 rounded hover:bg-surface-3" aria-label="Close panel" title="Close" onclick={() => (showPanel = null)}>
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
@@ -877,6 +937,12 @@
                             <button class="w-full text-left px-3 py-2 rounded text-xs text-text-secondary hover:bg-surface-3 hover:text-text-primary transition-colors truncate" title={entry.label.trim()} onclick={() => displayLocation(entry.href)}>{entry.label}</button>
                         {/each}
                     {/if}
+                {:else if showPanel === "search"}
+                    <form class="p-2" onsubmit={(event) => { event.preventDefault(); void searchBook(); }}><input class="ui-field w-full text-xs" bind:value={searchQuery} placeholder="Find text in this book" /><button class="ui-button-primary mt-2 w-full px-3 py-1.5 text-xs" disabled={searching || !searchQuery.trim()} type="submit">{searching ? 'Searching…' : 'Find'}</button></form>
+                    {#if !searching && searchQuery.trim() && searchResults.length === 0}<div class="p-4 text-xs text-text-muted">No matches found.</div>{/if}
+                    {#each searchResults as result (result.cfi)}<button class="w-full px-3 py-2 text-left text-xs text-text-secondary hover:bg-surface-3" onclick={() => displayLocation(result.cfi)}>{result.excerpt}</button>{/each}
+                {:else if showPanel === "highlights"}
+                    {#if annotations.length === 0}<div class="p-4 text-xs text-text-muted">Select text in the book to save a highlight.</div>{:else}{#each annotations as annotation (annotation.id)}<div class="group flex items-start gap-1 rounded hover:bg-surface-3"><button class="min-w-0 flex-1 px-3 py-2 text-left text-xs text-text-secondary" onclick={() => displayLocation(annotation.cfi_range)}>{annotation.text}</button><button class="p-2 text-text-muted opacity-0 hover:text-error group-hover:opacity-100" title="Remove highlight" aria-label="Remove highlight" onclick={() => void removeHighlight(annotation.cfi_range)}>×</button></div>{/each}{/if}
                 {:else if bookmarks.length === 0}
                     <div class="p-4 text-xs text-text-muted">Press B or use the bookmark button to save this page.</div>
                 {:else}
@@ -906,6 +972,9 @@
             <div class="flex flex-col items-center justify-center h-full text-error text-sm p-8 text-center gap-2">
                 <div>Unable to load this EPUB.</div>
                 <div class="text-xs text-text-muted max-w-md">{error}</div>
+                <button class="rounded bg-surface-2 px-3 py-1.5 text-xs text-text-primary hover:bg-surface-3" onclick={copyDiagnostics}>
+                    {copiedDiagnostics ? "Diagnostics copied" : "Copy diagnostics"}
+                </button>
             </div>
         {:else if loading}
             <div class="absolute inset-0 flex flex-col gap-1 items-center justify-center text-text-muted text-sm pointer-events-none"><div>Loading EPUB…</div><div class="text-xs opacity-70">{loadingStage}</div></div>

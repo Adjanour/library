@@ -1,51 +1,60 @@
 import { Hono } from "hono";
 import { DB } from "./db.ts";
-import { openFile } from "./open.ts";
-import { scanDirectory } from "./scanner.ts";
-import { match } from "./result.ts";
+import { Err, match } from "./result.ts";
 import type { Result } from "./result.ts";
 import { AppError } from "./result.ts";
 import {
+  BookmarkSchema,
+  AnnotationSchema,
+  BulkItemUpdateSchema,
+  CollectionCreateSchema,
+  CollectionItemUpdateSchema,
+  CollectionReorderSchema,
+  CollectionUpdateSchema,
   IdParamSchema,
   ItemUpdateSchema,
   ReaderPreferencesSchema,
   ReadingProgressUpdateSchema,
   SearchQuerySchema,
   SettingsSchema,
-  BulkItemUpdateSchema,
-  BookmarkSchema,
 } from "./validate.ts";
-import { dirname, fromFileUrl, isAbsolute, join, normalize } from "@std/path";
+import { dirname, fromFileUrl, join } from "@std/path";
 import { appCacheRoot, defaultScanDirectories } from "./platform.ts";
+import { Application } from "./application/lifecycle.ts";
+import { createRuntimeRoutes } from "./http/routes.ts";
+import { ReadingService } from "./application/reading.ts";
+import { QueueService } from "./application/queue.ts";
+import { LibraryService } from "./application/library.ts";
+import { SettingsService } from "./application/settings.ts";
+import { ScanningService } from "./application/scanning.ts";
+import { FilesService } from "./application/files.ts";
+import { ThumbnailService } from "./application/thumbnails.ts";
+import { extractDocumentContent } from "./content.ts";
+import { EnrichmentService } from "./application/enrichment.ts";
+import { GrobidService } from "./application/grobid.ts";
 
+const moduleStartedAt = performance.now();
 const app = new Hono();
+const databaseStartedAt = performance.now();
 const db = new DB(Deno.env.get("LIBRARY_DB_PATH") || undefined);
-const APP_VERSION = "0.1.1-dev";
+const APP_VERSION = "0.2.0";
+const application = new Application(db);
+application.recordStage("database", performance.now() - databaseStartedAt);
+application.transition("DatabaseReady");
+const servicesStartedAt = performance.now();
+const reading = new ReadingService(db);
+const queue = new QueueService(db);
+const library = new LibraryService(db);
+const settings = new SettingsService(db, defaultScanDirectories());
+const scanning = new ScanningService(db);
+const files = new FilesService(db);
+const thumbnails = new ThumbnailService(db);
+const enrichment = new EnrichmentService();
+const grobid = new GrobidService();
 const epubDiagnostics: Array<Record<string, unknown>> = [];
+application.recordStage("services", performance.now() - servicesStartedAt);
 
-const DEFAULT_SCAN_DIRS = defaultScanDirectories();
-
-function configuredScanDirectories(): string[] {
-  const raw = db.getSetting("scan_directories");
-  if (!raw) return DEFAULT_SCAN_DIRS;
-  try {
-    const value = JSON.parse(raw);
-    return Array.isArray(value) && value.length > 0 ? value : DEFAULT_SCAN_DIRS;
-  } catch {
-    return DEFAULT_SCAN_DIRS;
-  }
-}
-
-function configuredReaderPreferences() {
-  const raw = db.getSetting("reader_preferences");
-  if (!raw) return undefined;
-  try {
-    const parsed = ReaderPreferencesSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : undefined;
-  } catch {
-    return undefined;
-  }
-}
+app.route("/", createRuntimeRoutes(db, application, APP_VERSION));
 
 function respond<T>(result: Result<T>): Response {
   return match(result, {
@@ -68,7 +77,12 @@ function parseId(param: string): Result<number> {
 }
 
 app.get("/api/health", (c) => {
-  return c.json({ status: "ok", fts: db.fts, version: APP_VERSION });
+  return c.json({
+    status: "ok",
+    fts: db.fts,
+    version: APP_VERSION,
+    lifecycle_state: application.state,
+  });
 });
 
 app.get("/api/search", (c) => {
@@ -93,21 +107,89 @@ app.get("/api/search", (c) => {
   if (!result.success) {
     return Response.json({ error: result.error.message }, { status: 400 });
   }
-  return respond(db.search(result.data));
+  return respond(library.search(result.data));
 });
 
-app.get("/api/stats", () => respond(db.getStats()));
-app.get("/api/categories", () => respond(db.getCategories()));
-app.get("/api/tags", () => respond(db.getTags()));
-app.get("/api/purposes", () => respond(db.getPurposes()));
+app.get("/api/search/content", (c) => {
+  const query = (c.req.query("q") ?? "").trim();
+  if (query.length < 2 || query.length > 500) {
+    return Response.json({ error: "q must be between 2 and 500 characters" }, { status: 400 });
+  }
+  const limit = Number(c.req.query("limit") ?? "8");
+  return respond(library.contentSearch(query, Number.isFinite(limit) ? limit : 8));
+});
+
+app.get("/api/content-index/stats", () => Response.json(db.getContentIndexStats()));
+
+app.get("/api/stats", () => respond(library.stats()));
+app.get("/api/categories", () => respond(library.categories()));
+app.get("/api/tags", () => respond(library.tags()));
+app.get("/api/purposes", () => respond(library.purposes()));
+
+app.get("/api/items/:id/suggestions", (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  const item = library.item(id.value);
+  if (!item.ok) return respond(item);
+  return Response.json(library.suggestions(id.value));
+});
+
+app.get("/api/metadata-suggestions/pending", () =>
+  Response.json(library.pendingSuggestions()));
+
+app.post("/api/items/:id/enrich", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  const item = library.item(id.value);
+  if (!item.ok) return respond(item);
+  const body = await c.req.json().catch(() => ({}));
+  const allowTitleLookup = Boolean(body && typeof body === "object" && "allow_title_lookup" in body && body.allow_title_lookup);
+  const suggestions = await enrichment.enrich(item.value, allowTitleLookup);
+  const saved = library.saveSuggestions(id.value, suggestions);
+  if (!saved.ok) return respond(saved);
+  return Response.json({ saved: saved.value, suggestions: library.suggestions(id.value) });
+});
+
+app.post("/api/items/:id/extract-grobid", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  const item = library.item(id.value);
+  if (!item.ok) return respond(item);
+  if (!grobid.configured) {
+    return Response.json({ error: "GROBID_URL is not configured" }, { status: 503 });
+  }
+  try {
+    const candidates = await grobid.extract(item.value);
+    const saved = library.saveSuggestions(id.value, candidates);
+    if (!saved.ok) return respond(saved);
+    return Response.json({ saved: saved.value, suggestions: library.suggestions(id.value) });
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? error.message : "GROBID extraction failed" },
+      { status: 502 },
+    );
+  }
+});
+
+app.post("/api/metadata-suggestions/:id/:action", (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  const action = c.req.param("action");
+  if (action !== "apply" && action !== "reject") {
+    return Response.json({ error: "action must be apply or reject" }, { status: 400 });
+  }
+  return respond(library.resolveSuggestion(id.value, action === "apply"));
+});
 
 app.get("/api/settings", () =>
   Response.json({
-    scan_directories: configuredScanDirectories(),
+    scan_directories: settings.scanDirectories(),
+    catalog_page_size: settings.catalogPageSize(),
     platform: Deno.build.os,
     version: APP_VERSION,
     smoke_item_id: Number(Deno.env.get("LIBRARY_EPUB_SMOKE_ID")) || undefined,
-    reading_preferences: configuredReaderPreferences(),
+    reading_preferences: settings.readerPreferences(),
+    grobid_configured: grobid.configured,
   }));
 
 app.put("/api/settings/reading", async (c) => {
@@ -117,11 +199,17 @@ app.put("/api/settings/reading", async (c) => {
   if (!parsed.success) {
     return Response.json({ error: parsed.error.message }, { status: 400 });
   }
-  db.setSetting("reader_preferences", JSON.stringify(parsed.data));
+  settings.saveReaderPreferences(parsed.data);
   return Response.json(parsed.data);
 });
 
 app.get("/api/diagnostics/epub", () => Response.json(epubDiagnostics));
+app.get("/api/diagnostics/startup", () =>
+  Response.json({
+    module_elapsed_ms: Math.round((performance.now() - moduleStartedAt) * 100) /
+      100,
+    stages: application.stageLog,
+  }));
 
 app.post("/api/diagnostics/epub", async (c) => {
   const payload = await c.req.json().catch(() => ({}));
@@ -138,41 +226,120 @@ app.put("/api/settings", async (c) => {
   if (!parsed.success) {
     return Response.json({ error: parsed.error.message }, { status: 400 });
   }
-  const directories = [
-    ...new Set(
-      parsed.data.scan_directories.map((path) => normalize(path.trim())),
-    ),
-  ];
-  for (const path of directories) {
-    if (!isAbsolute(path)) {
-      return Response.json({
-        error: `Scan folders must be absolute paths: ${path}`,
-      }, { status: 400 });
-    }
-    try {
-      const info = await Deno.stat(path);
-      if (!info.isDirectory) {
-        return Response.json({ error: `Not a folder: ${path}` }, {
-          status: 400,
-        });
-      }
-    } catch {
-      return Response.json({
-        error: `Folder does not exist or cannot be read: ${path}`,
-      }, { status: 400 });
-    }
+  const saved = await settings.saveScanDirectories(
+    parsed.data.scan_directories,
+  );
+  if (!saved.ok) return Response.json({ error: saved.error }, { status: 400 });
+  if (parsed.data.catalog_page_size) {
+    settings.saveCatalogPageSize(parsed.data.catalog_page_size);
   }
-  db.setSetting("scan_directories", JSON.stringify(directories));
   return Response.json({
-    scan_directories: directories,
+    scan_directories: saved.directories,
+    catalog_page_size: settings.catalogPageSize(),
     platform: Deno.build.os,
     version: APP_VERSION,
   });
 });
 
+// Collections
+
+app.get("/api/collections", () => respond(library.collections()));
+
+app.post("/api/collections", async (c) => {
+  const parsed = CollectionCreateSchema.safeParse(
+    await c.req.json().catch(() => null),
+  );
+  if (!parsed.success) {
+    return Response.json({ error: parsed.error.message }, { status: 400 });
+  }
+  const created = library.createCollection(
+    parsed.data.name,
+    parsed.data.description,
+  );
+  return match(created, {
+    ok: (collection) => Response.json(collection, { status: 201 }),
+    err: (e) => respond(Err(e)),
+  });
+});
+
+app.put("/api/collections/:id", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  const parsed = CollectionUpdateSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return Response.json({ error: parsed.error.message }, { status: 400 });
+  return respond(library.updateCollection(id.value, parsed.data.name, parsed.data.description));
+});
+
+app.delete("/api/collections/:id", (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  const deleted = library.deleteCollection(id.value);
+  return match(deleted, {
+    ok: () => Response.json({ status: "deleted" }),
+    err: (e) => respond(Err(e)),
+  });
+});
+
+app.get("/api/collections/:id", (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  return respond(library.collection(id.value));
+});
+
+app.get("/api/collections/:id/items", (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  return respond(library.collectionItems(id.value));
+});
+
+app.post("/api/collections/:id/items", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  const parsed = CollectionItemUpdateSchema.safeParse(
+    await c.req.json().catch(() => null),
+  );
+  if (!parsed.success) {
+    return Response.json({ error: parsed.error.message }, { status: 400 });
+  }
+  const added = library.addToCollection(id.value, parsed.data.item_id);
+  return match(added, {
+    ok: () => Response.json({ status: "added" }),
+    err: (e) => respond(Err(e)),
+  });
+});
+
+app.delete("/api/collections/:id/items/:item_id", (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  const itemId = parseId(c.req.param("item_id"));
+  if (!itemId.ok) return respond(itemId);
+  const removed = library.removeFromCollection(id.value, itemId.value);
+  return match(removed, {
+    ok: () => Response.json({ status: "removed" }),
+    err: (e) => respond(Err(e)),
+  });
+});
+app.post("/api/collections/:id/reorder", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  const parsed = CollectionReorderSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return Response.json({ error: parsed.error.message }, { status: 400 });
+  return respond(library.reorderCollectionItems(id.value, parsed.data.ids));
+});
+
+app.get("/api/items/:id/evidence", (c) => {
+  const id = parseId(c.req.param("id"));
+  return id.ok ? Response.json(library.evidence(id.value)) : respond(id);
+});
+
+app.get("/api/items/:id/related", (c) => {
+  const id = parseId(c.req.param("id"));
+  return id.ok ? respond(library.relatedCopies(id.value)) : respond(id);
+});
+
 app.get("/api/items/:id", (c) => {
   const id = parseId(c.req.param("id"));
-  return id.ok ? respond(db.getItem(id.value)) : respond(id);
+  return id.ok ? respond(library.item(id.value)) : respond(id);
 });
 
 app.put("/api/items/:id", async (c) => {
@@ -184,42 +351,44 @@ app.put("/api/items/:id", async (c) => {
   if (!parsed.success) {
     return Response.json({ error: parsed.error.message }, { status: 400 });
   }
-  const result = db.updateItem(id.value, parsed.data);
+  const result = library.update(id.value, parsed.data);
   if (!result.ok) return respond(result);
-  return respond(db.getItem(id.value));
+  return respond(library.item(id.value));
 });
 
 app.delete("/api/items/:id", (c) => {
   const id = parseId(c.req.param("id"));
-  return id.ok ? respond(db.deleteItem(id.value)) : respond(id);
+  return id.ok ? respond(library.delete(id.value)) : respond(id);
 });
 
 app.post("/api/items/:id/restore", (c) => {
   const id = parseId(c.req.param("id"));
-  return id.ok ? respond(db.restoreItem(id.value)) : respond(id);
+  return id.ok ? respond(library.restore(id.value)) : respond(id);
 });
 
 app.delete("/api/items/:id/permanent", (c) => {
   const id = parseId(c.req.param("id"));
-  return id.ok ? respond(db.permanentlyDeleteItem(id.value)) : respond(id);
+  return id.ok ? respond(library.permanentlyDelete(id.value)) : respond(id);
 });
 
 app.patch("/api/items/bulk", async (c) => {
-  const parsed = BulkItemUpdateSchema.safeParse(await c.req.json().catch(() => null));
+  const parsed = BulkItemUpdateSchema.safeParse(
+    await c.req.json().catch(() => null),
+  );
   if (!parsed.success) {
     return Response.json({ error: parsed.error.message }, { status: 400 });
   }
-  const result = db.bulkUpdateItems(parsed.data.ids, parsed.data.updates);
+  const result = library.bulkUpdate(parsed.data.ids, parsed.data.updates);
   return respond(result);
 });
 
 app.post("/api/edits/:batch_id/undo", (c) => {
-  return respond(db.undoEdits(c.req.param("batch_id")));
+  return respond(library.undo(c.req.param("batch_id")));
 });
 
 app.on(["GET", "POST"], "/api/open/:id", (c) => {
   const id = parseId(c.req.param("id"));
-  return id.ok ? respond(openFile(db, id.value)) : respond(id);
+  return id.ok ? respond(files.open(id.value)) : respond(id);
 });
 
 async function fileMetaHeaders(path: string, filename: string, total: number) {
@@ -250,7 +419,7 @@ async function fileMetaHeaders(path: string, filename: string, total: number) {
 async function fileHead(c: any) {
   const id = parseId(c.req.param("id"));
   if (!id.ok) return Response.json({ error: "invalid id" }, { status: 400 });
-  const item = db.getItem(id.value);
+  const item = files.item(id.value);
   if (!item.ok) return Response.json({ error: "not found" }, { status: 404 });
   try {
     const stat = await Deno.stat(item.value.path);
@@ -268,10 +437,31 @@ async function fileHead(c: any) {
 }
 app.on("HEAD", "/api/file/:id", fileHead);
 
+app.get("/api/thumbnail/:id", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return Response.json({ error: "invalid id" }, { status: 400 });
+  const thumbnail = await thumbnails.get(id.value);
+  if (!thumbnail) {
+    return Response.json({ error: "thumbnail unavailable" }, { status: 404 });
+  }
+  const etag = `"${thumbnail.etag}"`;
+  if (c.req.header("if-none-match") === etag) {
+    return new Response(null, { status: 304, headers: { etag } });
+  }
+  const file = await Deno.open(thumbnail.path, { read: true });
+  return new Response(file.readable, {
+    headers: {
+      "content-type": thumbnail.contentType,
+      "cache-control": "private, max-age=3600",
+      etag,
+    },
+  });
+});
+
 app.get("/api/file/:id", async (c) => {
   const id = parseId(c.req.param("id"));
   if (!id.ok) return Response.json({ error: "invalid id" }, { status: 400 });
-  const item = db.getItem(id.value);
+  const item = files.item(id.value);
   if (!item.ok) return Response.json({ error: "not found" }, { status: 404 });
   try {
     const stat = await Deno.stat(item.value.path);
@@ -380,20 +570,20 @@ app.post("/api/reading/progress/:id", async (c) => {
   if (!parsed.success) {
     return Response.json({ error: parsed.error.message }, { status: 400 });
   }
-  return Response.json(db.recordReadingProgress(id.value, parsed.data));
+  return Response.json(reading.progress(id.value, parsed.data));
 });
 
 app.post("/api/reading/start/:id", (c) => {
   const id = parseId(c.req.param("id"));
   if (!id.ok) return respond(id);
-  const session = db.startReadingSession(id.value);
+  const session = reading.start(id.value);
   return Response.json(session);
 });
 
 app.post("/api/reading/heartbeat/:id", (c) => {
   const id = parseId(c.req.param("id"));
   if (!id.ok) return respond(id);
-  return Response.json({ active: db.touchReadingSession(id.value) });
+  return Response.json(reading.heartbeat(id.value));
 });
 
 app.get("/api/reading/bookmarks/:id", (c) => {
@@ -406,16 +596,46 @@ app.post("/api/reading/bookmarks/:id", async (c) => {
   const id = parseId(c.req.param("id"));
   if (!id.ok) return respond(id);
   const parsed = BookmarkSchema.safeParse(await c.req.json().catch(() => null));
-  if (!parsed.success) return Response.json({ error: parsed.error.message }, { status: 400 });
-  return Response.json(db.addBookmark(id.value, parsed.data.location, parsed.data.label, parsed.data.percent));
+  if (!parsed.success) {
+    return Response.json({ error: parsed.error.message }, { status: 400 });
+  }
+  return Response.json(
+    db.addBookmark(
+      id.value,
+      parsed.data.location,
+      parsed.data.label,
+      parsed.data.percent,
+    ),
+  );
 });
 
 app.delete("/api/reading/bookmarks/:id", (c) => {
   const id = parseId(c.req.param("id"));
   if (!id.ok) return respond(id);
   const location = c.req.query("location");
-  if (!location) return Response.json({ error: "location is required" }, { status: 400 });
+  if (!location) {
+    return Response.json({ error: "location is required" }, { status: 400 });
+  }
   return Response.json({ removed: db.removeBookmark(id.value, location) });
+});
+
+app.get("/api/reading/annotations/:id", (c) => {
+  const id = parseId(c.req.param("id"));
+  return id.ok ? Response.json(db.getAnnotations(id.value)) : respond(id);
+});
+app.post("/api/reading/annotations/:id", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  const parsed = AnnotationSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return Response.json({ error: parsed.error.message }, { status: 400 });
+  return Response.json(db.addAnnotation(id.value, parsed.data.cfi_range, parsed.data.text, parsed.data.note));
+});
+app.delete("/api/reading/annotations/:id", (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  const range = c.req.query("cfi_range");
+  if (!range) return Response.json({ error: "cfi_range is required" }, { status: 400 });
+  return Response.json({ removed: db.removeAnnotation(id.value, range) });
 });
 
 app.post("/api/reading/stop/:id", async (c) => {
@@ -437,25 +657,25 @@ app.get("/api/reading/sessions/:id", (c) => {
 });
 
 app.get("/api/reading/queue", () => {
-  return Response.json(db.getReadingQueue());
+  return Response.json(queue.list());
 });
 
 app.post("/api/reading/queue", async (c) => {
   const body = await c.req.json();
-  db.addToReadingQueue(body);
+  queue.add(body);
   return Response.json(body);
 });
 
 app.delete("/api/reading/queue/:id", (c) => {
   const id = parseId(c.req.param("id"));
   if (!id.ok) return respond(id);
-  db.removeFromReadingQueue(id.value);
+  queue.remove(id.value);
   return Response.json({ status: "removed" });
 });
 
 app.post("/api/reading/queue/reorder", async (c) => {
   const body = await c.req.json();
-  db.reorderReadingQueue(body.ids);
+  queue.reorder(body.ids);
   return Response.json({ status: "reordered" });
 });
 
@@ -466,14 +686,14 @@ app.get("/api/reading/dashboard", () => {
 app.post("/api/reading/finish/:id", (c) => {
   const id = parseId(c.req.param("id"));
   if (!id.ok) return respond(id);
-  db.finishReading(id.value);
-  return Response.json({ status: "finished" });
+  const nextItemId = reading.finish(id.value);
+  return Response.json({ status: "finished", next_item_id: nextItemId });
 });
 
 app.post("/api/reading/drop/:id", (c) => {
   const id = parseId(c.req.param("id"));
   if (!id.ok) return respond(id);
-  db.dropReading(id.value);
+  reading.drop(id.value);
   return Response.json({ status: "dropped" });
 });
 
@@ -495,11 +715,11 @@ app.post("/api/reading/sync-readest", () => {
   });
 });
 
-app.post("/api/quit", () => {
+app.post("/api/quit", async () => {
   // The desktop shell does not reliably exit when its window closes, so
   // offer an explicit quit: respond first, then terminate the process.
   // The single-instance pidfile is removed so the next launch starts clean.
-  db.closeActiveSessions();
+  await application.shutdown("api/quit");
   setTimeout(async () => {
     try {
       await Deno.remove(pidFile);
@@ -510,7 +730,7 @@ app.post("/api/quit", () => {
 });
 
 app.post("/api/scan", async (c) => {
-  let dirs = configuredScanDirectories();
+  let dirs = settings.scanDirectories();
   let force = false;
   try {
     const body = await c.req.json();
@@ -520,7 +740,7 @@ app.post("/api/scan", async (c) => {
     // No body sent — use defaults
   }
   let total = 0;
-  const result = await scanDirectory(db, dirs, (_current, t) => {
+  const result = await scanning.scan(dirs, (_current, t) => {
     total = t;
   }, force);
   return match(result, {
@@ -534,6 +754,37 @@ app.post("/api/scan", async (c) => {
   });
 });
 
+app.get("/api/items/:id/content-index", (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  const item = library.item(id.value);
+  if (!item.ok) return respond(item);
+  return Response.json(library.contentIndexState(id.value));
+});
+
+app.post("/api/items/:id/content-index", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (!id.ok) return respond(id);
+  const item = library.item(id.value);
+  if (!item.ok) return respond(item);
+  const body = await c.req.json().catch(() => ({}));
+  const ocr = Boolean(body && typeof body === "object" && "ocr" in body && body.ocr);
+  const extracted = await extractDocumentContent(item.value, ocr);
+  const saved = library.replaceDocumentContent(
+    id.value,
+    item.value.content_hash ?? "",
+    extracted.status,
+    extracted.chunks,
+    extracted.error,
+  );
+  if (!saved.ok) return respond(saved);
+  return Response.json({
+    status: extracted.status,
+    chunks: extracted.chunks.length,
+    error: extracted.error ?? "",
+  });
+});
+
 // Static file serving for frontend
 
 const staticDir = join(
@@ -543,9 +794,18 @@ const staticDir = join(
   "web",
   "static",
 );
+const webDevUrl = Deno.env.get("LIBRARY_WEB_DEV_URL")?.replace(/\/$/, "");
 
 app.get("/*", async (c) => {
   const path = c.req.path;
+  if (webDevUrl) {
+    try {
+      const upstream = await fetch(`${webDevUrl}${path}${c.req.url.includes("?") ? new URL(c.req.url).search : ""}`);
+      return new Response(upstream.body, { status: upstream.status, headers: upstream.headers });
+    } catch {
+      return new Response("The Vite development server is unavailable.", { status: 503 });
+    }
+  }
 
   const filePath = join(staticDir, path === "/" ? "index.html" : path);
   try {
@@ -587,13 +847,18 @@ app.get("/*", async (c) => {
 // therefore terminates any predecessor before serving.
 const pidDir = join(appCacheRoot(), "library");
 const pidFile = join(pidDir, "library.pid");
+application.setPidFile(pidFile);
+const instanceStartedAt = performance.now();
 try {
   await Deno.mkdir(pidDir, { recursive: true });
   const prev = parseInt((await Deno.readTextFile(pidFile)).trim(), 10);
   if (Number.isFinite(prev) && prev !== Deno.pid) {
     try {
       Deno.kill(prev, "SIGTERM");
-      await new Promise((r) => setTimeout(r, 1000));
+      // The application shutdown path is synchronous apart from pid cleanup;
+      // a short grace period avoids adding a full second to every stale-window
+      // recovery while still allowing SQLite sessions to close cleanly.
+      await new Promise((r) => setTimeout(r, 250));
       try {
         Deno.kill(prev, "SIGKILL");
       } catch { /* exited after TERM */ }
@@ -604,10 +869,51 @@ try {
 try {
   await Deno.writeTextFile(pidFile, String(Deno.pid));
 } catch { /* non-fatal */ }
+application.recordStage(
+  "single_instance",
+  performance.now() - instanceStartedAt,
+);
 
 const port = parseInt(Deno.args[0] ?? "3000");
 const addr = Deno.env.get("DENO_SERVE_ADDRESS");
 const actualPort = addr ? parseInt(addr.split(":").pop()!) : port;
 console.log(`Library server running on http://localhost:${actualPort}`);
+application.transition("HttpReady");
+application.transition("Ready");
+const server = Deno.serve({ port }, app.fetch);
+application.recordStage("module_to_http", performance.now() - moduleStartedAt);
+application.transition("Running");
 
-Deno.serve({ port }, app.fetch);
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  Deno.addSignalListener(signal, () => {
+    void application.shutdown(signal).finally(() => server.shutdown());
+  });
+}
+
+// Close the desktop app when the window is closed (SUPER+W, titlebar X, etc.)
+// The Deno 2.9.6 desktop runtime cannot complete a native close request on its
+// own (denoland/deno#36715: laufey 0.7.0 defers the close and the CEF backend
+// never finishes it), so the shell event is only a notification — this side
+// must exit the process. The first BrowserWindow constructed adopts the
+// shell's initial window; its "close" event is that close request.
+interface DesktopRuntime {
+  BrowserWindow?: new () => {
+    windowId: number;
+    addEventListener(type: "close", listener: () => void): void;
+  };
+}
+const desktop = Deno as unknown as DesktopRuntime;
+if (typeof desktop.BrowserWindow === "function") {
+  const win = new desktop.BrowserWindow();
+  // Adopting the window also makes us its close-requested handler, so the
+  // runtime routes SUPER+W / titlebar-X here; exiting the process closes it.
+  win.addEventListener("close", () => {
+    void application.shutdown("window-close");
+    setTimeout(() => {
+      try {
+        Deno.remove(pidFile);
+      } catch { /* non-fatal */ }
+      Deno.exit(0);
+    }, 200);
+  });
+}

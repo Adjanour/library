@@ -8,6 +8,11 @@ export const ItemUpdateSchema = z.object({
   tags: z.string().nullable().optional(),
   purpose: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
+  publisher: z.string().nullable().optional(),
+  language: z.string().nullable().optional(),
+  doi: z.string().nullable().optional(),
+  isbn: z.string().nullable().optional(),
+  arxiv_id: z.string().nullable().optional(),
 });
 
 export const SearchQuerySchema = z.object({
@@ -42,10 +47,34 @@ export const IdParamSchema = z.object({
 
 export const SettingsSchema = z.object({
   scan_directories: z.array(z.string().trim().min(1)).min(1).max(20),
+  // Optional so a scan-directories-only save keeps the saved page size.
+  catalog_page_size: z.number().int().min(12).max(96).optional(),
 });
 
+export const CollectionCreateSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  description: z.string().trim().max(280).optional().default(""),
+});
+
+export const CollectionUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  description: z.string().trim().max(280),
+});
+
+export const CollectionItemUpdateSchema = z.object({
+  item_id: z.coerce.number().int().positive(),
+});
+export const CollectionReorderSchema = z.object({ ids: z.array(z.number().int().positive()).min(1).max(1000) });
+
 export const ReadingProgressSchema = z.object({
-  status: z.enum(["unread", "queued", "reading", "finished", "dropped", "abandoned"]),
+  status: z.enum([
+    "unread",
+    "queued",
+    "reading",
+    "finished",
+    "dropped",
+    "abandoned",
+  ]),
   progress_percent: z.number().int().min(0).max(100),
   current_page: z.number().int().min(0),
   total_pages: z.number().int().min(0),
@@ -78,10 +107,28 @@ export const ReadingProgressUpdateSchema = z.object({
   }
 });
 
+export const QueueItemSchema = z.object({
+  item_id: z.number().int().positive().nullable().optional(),
+  focusd_book_number: z.number().int().nonnegative().nullable().optional(),
+  title: z.string().trim().min(1).max(500),
+  author: z.string().max(500).default(""),
+  priority: z.number().int().nonnegative().optional(),
+});
+
+export const QueueReorderSchema = z.object({
+  ids: z.array(z.number().int().positive()).min(1).max(1000),
+});
+
 export const BookmarkSchema = z.object({
   location: z.string().trim().min(1).max(1000),
   label: z.string().trim().max(300).default(""),
   percent: z.number().int().min(0).max(100),
+});
+
+export const AnnotationSchema = z.object({
+  cfi_range: z.string().trim().min(1).max(2000),
+  text: z.string().trim().max(2000).default(""),
+  note: z.string().trim().max(2000).default(""),
 });
 
 export const ReaderPreferencesSchema = z.object({

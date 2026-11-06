@@ -51,7 +51,7 @@ Deno.test("legacy database migrates idempotently and keeps a backup", async () =
   const version = db.connection.prepare("PRAGMA user_version").get() as {
     user_version: number;
   };
-  assertEquals(version.user_version, 5);
+  assertEquals(version.user_version, 11);
   const item = db.getItem(1);
   assert(item.ok);
   if (item.ok) {
@@ -59,18 +59,39 @@ Deno.test("legacy database migrates idempotently and keeps a backup", async () =
     assertEquals(item.value.title_source, "metadata");
     assertEquals(item.value.ignored, 0);
   }
+  const migratedSearch = db.search({
+    q: "Legacy",
+    type: "",
+    category: "",
+    tag: "",
+    purpose: "",
+    year: 0,
+    sort: "",
+    order: "",
+    page: 1,
+    limit: 20,
+  });
+  assert(migratedSearch.ok);
+  if (migratedSearch.ok) assertEquals(migratedSearch.value.total, 1);
   db.close();
 
   const again = new DB(path);
-  const againVersion = again.connection.prepare("PRAGMA user_version").get() as {
-    user_version: number;
-  };
-  assertEquals(againVersion.user_version, 5);
+  const againVersion = again.connection.prepare("PRAGMA user_version")
+    .get() as {
+      user_version: number;
+    };
+  assertEquals(againVersion.user_version, 11);
   assertEquals(again.getItem(1).ok, true);
   again.close();
 
   const backup = await Deno.stat(`${path}.bak-5`);
   assertEquals(backup.isFile, true);
+  const metadataBackup = await Deno.stat(`${path}.bak-7`);
+  assertEquals(metadataBackup.isFile, true);
+  const contentBackup = await Deno.stat(`${path}.bak-8`);
+  assertEquals(contentBackup.isFile, true);
+  const suggestionsBackup = await Deno.stat(`${path}.bak-9`);
+  assertEquals(suggestionsBackup.isFile, true);
   await Deno.remove(dir, { recursive: true });
 });
 
@@ -87,6 +108,55 @@ Deno.test("application settings persist by key", () => {
 Deno.test("FTS5 is available", () => {
   const db = new DB(":memory:");
   assertEquals(db.fts, true);
+  db.close();
+});
+
+Deno.test("document text search returns a local matching passage", () => {
+  const db = new DB(":memory:");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename, type) VALUES (?, ?, ?, ?)",
+  ).run("Distributed Systems", "/tmp/systems.pdf", "systems.pdf", "book");
+  const indexed = db.replaceDocumentContent(1, "hash", "indexed", [{
+    location: "Page 12",
+    heading: "Consensus",
+    content: "Raft uses leader election to coordinate replicated state machines.",
+  }]);
+  assert(indexed.ok);
+  const results = db.searchDocumentContent("leader election");
+  assert(results.ok);
+  if (results.ok) {
+    assertEquals(results.value.length, 1);
+    assertEquals(results.value[0]?.location, "Page 12");
+  }
+  assertEquals(db.getContentIndexStats(), {
+    indexed: 1,
+    truncated: 0,
+    needs_ocr: 0,
+    failed: 0,
+    unavailable: 0,
+    pending: 0,
+    total: 1,
+  });
+  db.close();
+});
+
+Deno.test("metadata suggestions require explicit resolution and retain provenance", () => {
+  const db = new DB(":memory:");
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename, type) VALUES (?, ?, ?, ?)",
+  ).run("Untitled", "/tmp/book.pdf", "book.pdf", "book");
+  const saved = db.saveMetadataSuggestions(1, [{
+    field: "doi", value: "10.1000/example", source: "crossref", confidence: 0.99,
+    details_json: JSON.stringify({ provider: "Crossref" }),
+  }]);
+  assert(saved.ok);
+  assertEquals(db.getMetadataSuggestions(1).length, 1);
+  const suggestion = db.getMetadataSuggestions(1)[0]!;
+  const applied = db.resolveMetadataSuggestion(suggestion.id, true);
+  assert(applied.ok);
+  if (applied.ok) assertEquals(applied.value?.doi, "10.1000/example");
+  assertEquals(db.getMetadataSuggestions(1).length, 0);
+  assertEquals(db.getMetadataEvidence(1)[0]?.source, "crossref");
   db.close();
 });
 
@@ -160,6 +230,53 @@ Deno.test("FTS5 triggers sync on insert", () => {
   db.close();
 });
 
+Deno.test("metadata evidence and stable identifiers survive an upsert", () => {
+  const db = new DB(":memory:");
+  const result = db.upsertItem({
+    title: "A Reliable Paper",
+    authors: "Ada Author",
+    year: 2024,
+    path: "/tmp/reliable.pdf",
+    filename: "reliable.pdf",
+    type: "paper",
+    category: "research",
+    tags: "",
+    purpose: "research",
+    description: "",
+    doi: "10.1000/reliable",
+    content_hash: "abc123",
+    size: 10,
+    metadata_evidence: [{
+      field: "doi",
+      value: "10.1000/reliable",
+      source: "pdf_first_pages",
+      confidence: 0.92,
+      extractor_version: "test-v1",
+    }],
+  } as Item);
+  assertEquals(result.ok, true);
+  const item = db.getItem(1);
+  assert(item.ok);
+  if (item.ok) {
+    assertEquals(item.value.doi, "10.1000/reliable");
+    assertEquals(item.value.content_hash, "abc123");
+  }
+  assertEquals(db.getMetadataEvidence(1), [{
+    field: "doi",
+    value: "10.1000/reliable",
+    source: "pdf_first_pages",
+    confidence: 0.92,
+    extractor_version: "test-v1",
+  }]);
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename, content_hash) VALUES (?, ?, ?, ?)",
+  ).run("A second copy", "/tmp/copy.pdf", "copy.pdf", "abc123");
+  const related = db.getRelatedCopies(1);
+  assert(related.ok);
+  if (related.ok) assertEquals(related.value.map((copy) => copy.id), [2]);
+  db.close();
+});
+
 Deno.test("getItem returns item by id", () => {
   const db = new DB(":memory:");
 
@@ -213,8 +330,16 @@ Deno.test("deleteItem ignores an item without deleting its row", () => {
   assertEquals(item.ok, true);
   if (item.ok) assertEquals(item.value.ignored, 1);
   const result2 = db.search({
-    q: "To Delete", type: "", category: "", tag: "", purpose: "", year: 0,
-    sort: "", order: "", page: 1, limit: 20,
+    q: "To Delete",
+    type: "",
+    category: "",
+    tag: "",
+    purpose: "",
+    year: 0,
+    sort: "",
+    order: "",
+    page: 1,
+    limit: 20,
   });
   assertEquals(result2.ok, true);
   if (result2.ok) assertEquals(result2.value.total, 0);
@@ -227,7 +352,10 @@ Deno.test("manual metadata stays locked across scanner upserts", () => {
   db.connection.prepare(
     "INSERT INTO items (title, authors, path, filename) VALUES (?, ?, ?, ?)",
   ).run("Original", "Original Author", "/tmp/locked.pdf", "locked.pdf");
-  assertEquals(db.updateItem(1, { title: "Corrected", authors: "Me" }).ok, true);
+  assertEquals(
+    db.updateItem(1, { title: "Corrected", authors: "Me" }).ok,
+    true,
+  );
 
   const result = db.upsertItem({
     id: 1,
@@ -270,8 +398,16 @@ Deno.test("ignored items can be restored", () => {
   assertEquals(db.deleteItem(1).ok, true);
   assertEquals(db.restoreItem(1).ok, true);
   const result = db.search({
-    q: "Restorable", type: "", category: "", tag: "", purpose: "", year: 0,
-    sort: "", order: "", page: 1, limit: 20,
+    q: "Restorable",
+    type: "",
+    category: "",
+    tag: "",
+    purpose: "",
+    year: 0,
+    sort: "",
+    order: "",
+    page: 1,
+    limit: 20,
   });
   assertEquals(result.ok, true);
   if (result.ok) assertEquals(result.value.total, 1);
@@ -491,6 +627,43 @@ Deno.test("search treats punctuation in titles as text instead of FTS syntax", (
   db.close();
 });
 
+Deno.test("search ranks exact titles ahead of body metadata matches", () => {
+  const db = new DB(":memory:");
+  db.connection.prepare(
+    "INSERT INTO items (title, description, path, filename) VALUES (?, ?, ?, ?)",
+  ).run("Distributed Systems", "A textbook", "/exact.pdf", "exact.pdf");
+  db.connection.prepare(
+    "INSERT INTO items (title, description, path, filename) VALUES (?, ?, ?, ?)",
+  ).run(
+    "Course Notes",
+    "Notes about distributed systems",
+    "/notes.pdf",
+    "notes.pdf",
+  );
+
+  const result = db.search({
+    q: "Distributed Systems",
+    type: "",
+    category: "",
+    tag: "",
+    purpose: "",
+    year: 0,
+    sort: "",
+    order: "",
+    page: 1,
+    limit: 20,
+  });
+  assert(result.ok);
+  if (result.ok) {
+    assertEquals(result.value.items.map((item) => item.title), [
+      "Distributed Systems",
+      "Course Notes",
+    ]);
+    assert(result.value.items[0]!.match_snippet?.includes("<mark>"));
+  }
+  db.close();
+});
+
 Deno.test("search filters by type", () => {
   const db = new DB(":memory:");
 
@@ -676,7 +849,11 @@ Deno.test("atomic progress cannot undo a finished book", () => {
   const db = new DB(":memory:");
   db.connection.prepare(
     "INSERT INTO items (title, path, filename) VALUES (?, ?, ?)",
-  ).run("Finished Monotonic Book", "/tmp/finished-monotonic.pdf", "finished-monotonic.pdf");
+  ).run(
+    "Finished Monotonic Book",
+    "/tmp/finished-monotonic.pdf",
+    "finished-monotonic.pdf",
+  );
 
   db.recordReadingProgress(1, {
     progress_percent: 100,
@@ -707,7 +884,11 @@ Deno.test("sessions expose activity and orphan cleanup closes stale sessions", (
   const db = new DB(":memory:");
   db.connection.prepare(
     "INSERT INTO items (title, path, filename) VALUES (?, ?, ?)",
-  ).run("Session Lifecycle Book", "/tmp/session-lifecycle.pdf", "session-lifecycle.pdf");
+  ).run(
+    "Session Lifecycle Book",
+    "/tmp/session-lifecycle.pdf",
+    "session-lifecycle.pdf",
+  );
 
   const session = db.startReadingSession(1);
   assertExists(session.last_activity_at);
@@ -737,7 +918,10 @@ Deno.test("bookmarks persist by item and location", () => {
 
   const created = db.addBookmark(1, "epubcfi(/6/2)", "Chapter one", 12);
   assertEquals(created.location, "epubcfi(/6/2)");
-  assertEquals(db.addBookmark(1, "epubcfi(/6/2)", "Updated label", 14).id, created.id);
+  assertEquals(
+    db.addBookmark(1, "epubcfi(/6/2)", "Updated label", 14).id,
+    created.id,
+  );
   assertEquals(db.getBookmarks(1)[0]?.label, "Updated label");
   assertEquals(db.removeBookmark(1, "epubcfi(/6/2)"), true);
   assertEquals(db.getBookmarks(1).length, 0);
@@ -756,28 +940,95 @@ Deno.test("finishing a book creates durable finished progress", () => {
   db.close();
 });
 
+Deno.test("queue status stays synchronized and finishing promotes the next book", () => {
+  const db = new DB(":memory:");
+  for (
+    const [title, filename] of [["Queue First", "queue-first.epub"], [
+      "Queue Next",
+      "queue-next.epub",
+    ]] as const
+  ) {
+    db.connection.prepare(
+      "INSERT INTO items (title, path, filename) VALUES (?, ?, ?)",
+    ).run(title, `/tmp/${filename}`, filename);
+  }
+
+  db.addToReadingQueue({
+    id: 0,
+    item_id: 1,
+    focusd_book_number: null,
+    title: "Queue First",
+    author: "",
+    priority: 0,
+    added_at: "",
+  });
+  db.addToReadingQueue({
+    id: 0,
+    item_id: 2,
+    focusd_book_number: null,
+    title: "Queue Next",
+    author: "",
+    priority: 0,
+    added_at: "",
+  });
+  assertEquals(db.getReadingProgress(1)?.status, "queued");
+  assertEquals(db.getReadingProgress(2)?.status, "queued");
+
+  db.startReadingSession(1);
+  assertEquals(db.getReadingProgress(1)?.status, "reading");
+  assertEquals(db.finishReading(1), 2);
+  assertEquals(db.getReadingProgress(1)?.status, "finished");
+  assertEquals(db.getReadingQueue().map((item) => item.item_id), [2]);
+
+  const nextQueueId = db.getReadingQueue()[0]!.id;
+  db.removeFromReadingQueue(nextQueueId);
+  assertEquals(db.getReadingProgress(2)?.status, "unread");
+  db.close();
+});
+
 Deno.test("search cursor continues without duplicating rows and returns facets", () => {
   const db = new DB(":memory:");
-  for (const [title, category] of [["Same title A", "research"], ["Same title B", "research"], ["Another title", "learning"]] as const) {
+  for (
+    const [title, category] of [["Same title A", "research"], [
+      "Same title B",
+      "research",
+    ], ["Another title", "learning"]] as const
+  ) {
     db.connection.prepare(
       "INSERT INTO items (title, path, filename, category) VALUES (?, ?, ?, ?)",
     ).run(title, `/${title}.pdf`, `${title}.pdf`, category);
   }
   const query = {
-    q: "", type: "", category: "", tag: "", purpose: "", year: 0,
-    sort: "", order: "", page: 1, limit: 1,
+    q: "",
+    type: "",
+    category: "",
+    tag: "",
+    purpose: "",
+    year: 0,
+    sort: "",
+    order: "",
+    page: 1,
+    limit: 1,
   };
   const first = db.search(query);
   assert(first.ok);
   if (first.ok) {
     assertEquals(first.value.items.length, 1);
     assertEquals(first.value.next_cursor !== null, true);
-    const second = db.search({ ...query, cursor: first.value.next_cursor ?? undefined });
+    const second = db.search({
+      ...query,
+      cursor: first.value.next_cursor ?? undefined,
+    });
     assert(second.ok);
     if (second.ok) {
       assertEquals(second.value.items.length, 1);
-      assertEquals(second.value.items[0]!.id !== first.value.items[0]!.id, true);
-      const research = second.value.facets?.category.find((facet) => facet.name === "research");
+      assertEquals(
+        second.value.items[0]!.id !== first.value.items[0]!.id,
+        true,
+      );
+      const research = second.value.facets?.category.find((facet) =>
+        facet.name === "research"
+      );
       assertEquals(research?.count, 2);
     }
   }
@@ -786,7 +1037,12 @@ Deno.test("search cursor continues without duplicating rows and returns facets",
 
 Deno.test("bulk metadata edits can be undone as one batch", () => {
   const db = new DB(":memory:");
-  for (const [title, path] of [["First", "/tmp/first.pdf"], ["Second", "/tmp/second.pdf"]] as const) {
+  for (
+    const [title, path] of [["First", "/tmp/first.pdf"], [
+      "Second",
+      "/tmp/second.pdf",
+    ]] as const
+  ) {
     db.connection.prepare(
       "INSERT INTO items (title, path, filename, category) VALUES (?, ?, ?, ?)",
     ).run(title, path, `${title.toLowerCase()}.pdf`, "old");

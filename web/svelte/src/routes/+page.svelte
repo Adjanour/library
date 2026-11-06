@@ -1,448 +1,61 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
-  import { api, type AppSettings, type Item, type Stats, type CategoryCount, type TagCount, type SearchFacets, type ReadingDashboard, type ReadingProgress, type ReadingSession, type ReadingQueueItem, type ItemUpdate } from '$lib/api';
-  import Sidebar from '$lib/components/Sidebar.svelte';
-  import Toolbar from '$lib/components/Toolbar.svelte';
-  import BookCard from '$lib/components/BookCard.svelte';
-  import BookRow from '$lib/components/BookRow.svelte';
-  import DetailPanel from '$lib/components/DetailPanel.svelte';
-  import Reader from '$lib/components/Reader.svelte';
-  import Modals from '$lib/components/Modals.svelte';
-  import CommandPalette from '$lib/components/CommandPalette.svelte';
-  import SettingsPanel from '$lib/components/SettingsPanel.svelte';
+  import { onMount } from 'svelte';
+  import { api, type ContentIndexStats, type ReadingDashboard, type Stats } from '$lib/api';
 
-  let query = $state(''), activeType = $state(''), activeCategory = $state('');
-  let activeTag = $state(''), activePurpose = $state(''), sortBy = $state('');
-  let items = $state<Item[]>([]), total = $state(0), page = $state(1), totalPages = $state(1);
-  let nextCursor = $state<string | null>(null), facets = $state<SearchFacets | null>(null);
-  let bulkMode = $state(false), selectedIds = $state<number[]>([]), bulkCategory = $state('');
-  let bulkBusy = $state(false), lastBatchId = $state<string | null>(null);
+  let reading = $state<ReadingDashboard | null>(null);
   let stats = $state<Stats | null>(null);
-  let categories = $state<CategoryCount[]>([]);
-  let tags = $state<TagCount[]>([]);
-  let purposes = $state<TagCount[]>([]);
-  let selectedItem = $state<Item | null>(null);
-  let view = $state<'grid' | 'list' | 'reading'>('grid');
-  let dashboard = $state<ReadingDashboard | null>(null);
-  let loading = $state(false);
-  let selectedProgress = $state<ReadingProgress | null>(null);
-  let selectedSessions = $state<ReadingSession[]>([]);
-  let showDeleteModal = $state(false), showKeybindings = $state(false);
-  let showCommandPalette = $state(false);
-  let showSettings = $state(false);
-  let appSettings = $state<AppSettings | null>(null);
-  let readingItem = $state<Item | null>(null);
-  let draggedQueueId = $state<number | null>(null);
-  let queueDropId = $state<number | null>(null);
-  let theme = $state<'dark' | 'light'>(typeof window !== 'undefined'
-    ? (localStorage.getItem('theme') as 'dark' | 'light') ||
-      (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : 'dark');
-  let showPreviewPanel = $state(typeof window !== 'undefined'
-    ? localStorage.getItem('showPreviewPanel') !== 'false'
-    : true);
-  let itemsPerPage = $state(typeof window !== 'undefined'
-    ? parseInt(localStorage.getItem('itemsPerPage') || '20', 10)
-    : 20);
-  let middleWidth = $state(typeof window !== 'undefined'
-    ? parseInt(localStorage.getItem('middleWidth') || '420', 10)
-    : 420);
-  let isResizing = $state(false);
+  let index = $state<ContentIndexStats | null>(null);
+  let error = $state('');
 
-  async function search() {
-    loading = true;
-    try { const r = await api.search(query, { type: activeType || undefined, category: activeCategory || undefined,
-      tag: activeTag || undefined, purpose: activePurpose || undefined, sort: sortBy || undefined, page, limit: itemsPerPage });
-      items = r.items || []; total = r.total; totalPages = r.total_pages; nextCursor = r.next_cursor ?? null; facets = r.facets ?? null;
-    } catch (e) { console.error(e); items = []; }
-    loading = false;
-  }
-  async function loadMore() {
-    if (!nextCursor || loading) return;
-    loading = true;
-    try {
-      const r = await api.search(query, { type: activeType || undefined, category: activeCategory || undefined,
-        tag: activeTag || undefined, purpose: activePurpose || undefined, sort: sortBy || undefined, limit: itemsPerPage, cursor: nextCursor });
-      items = [...items, ...(r.items || [])]; nextCursor = r.next_cursor ?? null; facets = r.facets ?? facets; total = r.total;
-    } catch (e) { console.error(e); }
-    loading = false;
-  }
-  async function loadSidebarData() { try { const [s, c, t, p] = await Promise.all([api.stats(), api.categories(), api.tags(), api.purposes()]);
-    stats = s; categories = c; tags = t; purposes = p; } catch (e) { console.error(e); } }
-  async function loadDashboard() { try { dashboard = await api.readingDashboard(); } catch (e) { console.error(e); } }
-  async function loadProgress(item: Item) {
-    try { selectedProgress = await api.readingProgress(item.id); } catch { selectedProgress = null; }
-    try { selectedSessions = await api.readingSessions(item.id); } catch { selectedSessions = []; }
-  }
-  function selectItem(item: Item) { selectedItem = item; if (view === 'reading') view = 'grid'; loadProgress(item); }
-  function continueReading(item: Item) {
-    selectedItem = item;
-    loadProgress(item);
-    readingItem = item;
-  }
-  async function readQueueItem(queueItem: ReadingQueueItem) {
-    if (!queueItem.item_id) return;
-    try {
-      const item = await api.item(queueItem.item_id);
-      continueReading(item);
-    } catch (e) { console.error(e); }
-  }
-  async function skipQueueItem(queueItem: ReadingQueueItem) {
-    if (!window.confirm(`Remove "${queueItem.title}" from your reading queue?`)) return;
-    try {
-      await api.removeFromQueue(queueItem.id);
-      await loadDashboard();
-    } catch (e) { console.error(e); }
-  }
-  async function reorderQueue(targetId: number) {
-    if (!dashboard || draggedQueueId === null || draggedQueueId === targetId) return;
-    const ids = dashboard.queue.map((item) => item.id);
-    const from = ids.indexOf(draggedQueueId);
-    const to = ids.indexOf(targetId);
-    if (from < 0 || to < 0) return;
-    ids.splice(from, 1);
-    ids.splice(to, 0, draggedQueueId);
-    draggedQueueId = null;
-    queueDropId = null;
-    try {
-      await api.reorderQueue(ids);
-      await loadDashboard();
-    } catch (e) { console.error(e); await loadDashboard(); }
-  }
-  function handleQueryInput(e: Event) { query = (e.target as HTMLInputElement).value; page = 1; search(); }
-  function handleSearch(e: Event) { e.preventDefault(); page = 1; search(); }
-  function selectType(t: string) { activeType = t; activeCategory = ''; activeTag = ''; activePurpose = ''; page = 1; search(); }
-  function selectCategory(c: string) { activeCategory = c; page = 1; search(); }
-  function selectTag(t: string) { activeTag = t; page = 1; search(); }
-  function selectPurpose(p: string) { activePurpose = p; page = 1; search(); }
-  function clearFilters() { query = ''; activeType = ''; activeCategory = ''; activeTag = ''; activePurpose = ''; page = 1; search(); }
-  function removeFilter(kind: 'query' | 'type' | 'category' | 'tag' | 'purpose') {
-    if (kind === 'query') query = '';
-    if (kind === 'type') activeType = '';
-    if (kind === 'category') activeCategory = '';
-    if (kind === 'tag') activeTag = '';
-    if (kind === 'purpose') activePurpose = '';
-    page = 1; search();
-  }
-  async function queueSelected() {
-    if (!selectedItem) return;
-    try { await api.addToQueue({ item_id: selectedItem.id }); await loadDashboard(); } catch (e) { console.error(e); }
-  }
-  function toggleTheme() { theme = theme === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', theme); localStorage.setItem('theme', theme); }
-  function togglePreviewPanel() { showPreviewPanel = !showPreviewPanel;
-    localStorage.setItem('showPreviewPanel', String(showPreviewPanel)); }
-  function setItemsPerPage(n: number) { itemsPerPage = n; page = 1;
-    localStorage.setItem('itemsPerPage', String(n)); search(); }
-  function toggleBulk(item: Item) {
-    selectedIds = selectedIds.includes(item.id) ? selectedIds.filter((id) => id !== item.id) : [...selectedIds, item.id];
-  }
-  function toggleBulkMode() { bulkMode = !bulkMode; if (!bulkMode) selectedIds = []; }
-  function selectVisible() { selectedIds = selectedIds.length === items.length ? [] : items.map((item) => item.id); }
-  async function applyBulkEdit() {
-    if (!selectedIds.length || !bulkCategory || bulkBusy) return;
-    bulkBusy = true;
-    try { const result = await api.bulkUpdate(selectedIds, { category: bulkCategory } satisfies ItemUpdate); lastBatchId = result.batch_id; selectedIds = []; bulkMode = false; await search(); await loadSidebarData(); }
-    catch (e) { console.error(e); }
-    bulkBusy = false;
-  }
-  async function undoBulkEdit() {
-    if (!lastBatchId || bulkBusy) return;
-    bulkBusy = true;
-    try { await api.undoEdits(lastBatchId); lastBatchId = null; await search(); await loadSidebarData(); }
-    catch (e) { console.error(e); }
-    bulkBusy = false;
-  }
-  function startResize(e: MouseEvent) {
-    e.preventDefault();
-    isResizing = true;
-    const startX = e.clientX;
-    const startWidth = middleWidth;
-    function onMove(ev: MouseEvent) {
-      const delta = ev.clientX - startX;
-      const newWidth = Math.max(280, Math.min(startWidth + delta, window.innerWidth - 320));
-      middleWidth = newWidth;
-    }
-    function onUp() {
-      isResizing = false;
-      localStorage.setItem('middleWidth', String(middleWidth));
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    }
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }
-  async function rescan() { loading = true;
-    try { await api.scan(); await Promise.all([search(), loadSidebarData()]); } catch (e) { console.error(e); } loading = false; }
-  async function onSaved(u: Item) { selectedItem = u; items = items.map((i) => (i.id === u.id ? u : i)); await loadSidebarData(); }
-  async function openSettings() {
-    try { appSettings = await api.settings(); showSettings = true; } catch (e) { console.error(e); }
-  }
-  async function saveSettings(scanDirectories: string[]) {
-    appSettings = await api.updateSettings({ scan_directories: scanDirectories });
-    showSettings = false;
-    await rescan();
-  }
-  async function saveReadingPreferences(preferences: NonNullable<AppSettings['reading_preferences']>) {
-    const saved = await api.updateReadingPreferences(preferences);
-    if (appSettings) appSettings = { ...appSettings, reading_preferences: saved };
-  }
-  async function deleteItem() { if (!selectedItem) return;
-    try { await api.delete(selectedItem.id); selectedItem = null; showDeleteModal = false; search(); loadSidebarData(); } catch (e) { console.error(e); } }
-  async function quitApp() {
-    try { await api.quit(); } catch { /* server exits; the fetch aborts */ }
-    try { window.close(); } catch { /* webview may refuse; user can close the window */ }
-  }
+  const typeCount = $derived(stats ? Object.values(stats.by_type).reduce((total, count) => total + count, 0) : 0);
+  const indexedPercent = $derived(index && index.total > 0 ? Math.round((index.indexed / index.total) * 100) : 0);
+  const indexLabel = $derived(!index ? 'Loading' : index.pending > 0 ? `${index.pending} awaiting index` : index.failed > 0 ? `${index.failed} need attention` : 'Up to date');
+  const formatDate = (value: string) => new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(value));
 
-  function handleKeydown(e: KeyboardEvent) {
-    const t = e.target as HTMLElement | null;
-    const isInput = !!t?.matches('input, textarea, select, [contenteditable="true"]');
-    if (readingItem) return;
-    if (e.key === 'Escape') {
-      if (showSettings) showSettings = false; else if (showCommandPalette) showCommandPalette = false; else if (readingItem) readingItem = null; else if (showDeleteModal) showDeleteModal = false;
-      else if (showKeybindings) showKeybindings = false; else if (selectedItem) selectedItem = null;
-      else (document.activeElement as HTMLElement)?.blur(); return;
+  onMount(async () => {
+    try {
+      [reading, stats, index] = await Promise.all([api.readingDashboard(), api.stats(), api.contentIndexStats()]);
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : 'Could not load your library overview.';
     }
-    if (showSettings || showDeleteModal || showCommandPalette) return;
-    if (e.key === '?' && !isInput) { e.preventDefault(); showKeybindings = !showKeybindings; return; }
-    if (showKeybindings) return;
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); showCommandPalette = true; return; }
-    if (e.key === '/' && !isInput) { e.preventDefault(); document.getElementById('search-input')?.focus(); return; }
-    if (isInput) return;
-    if (e.key === 'j' || e.key === 'ArrowDown') { const i = items.findIndex((x) => x.id === selectedItem?.id); if (i < items.length - 1) selectItem(items[i + 1]); e.preventDefault(); }
-    if (e.key === 'k' || e.key === 'ArrowUp') { const i = items.findIndex((x) => x.id === selectedItem?.id); if (i > 0) selectItem(items[i - 1]); e.preventDefault(); }
-    if ((e.key === 'Enter' || e.key === 'o') && selectedItem) { api.open(selectedItem.id); e.preventDefault(); }
-    if (e.key === 'r' && selectedItem) { readingItem = selectedItem; e.preventDefault(); }
-    if (e.key === 'd' && selectedItem) { showDeleteModal = true; e.preventDefault(); }
-    if (e.key === 'R') rescan();
-    if (e.key === 'g') view = 'grid';
-    if (e.key === 'l') view = 'list';
-    if (e.key === 'b') { view = 'reading'; loadDashboard(); }
-    if (e.key === 'p') togglePreviewPanel();
-  }
-  let hasFilters = $derived(!!query || !!activeType || !!activeCategory || !!activeTag || !!activePurpose);
-  let commands = $derived([
-    { id: 'search', label: 'Focus search', hint: 'Search titles, authors, and metadata', shortcut: '/', run: () => document.getElementById('search-input')?.focus() },
-    { id: 'grid', label: 'Show grid view', hint: 'See more covers at a glance', shortcut: 'g', run: () => view = 'grid' },
-    { id: 'list', label: 'Show list view', hint: 'Scan dense metadata quickly', shortcut: 'l', run: () => view = 'list' },
-    { id: 'dashboard', label: 'Open reading dashboard', hint: 'Queue and continue reading', shortcut: 'b', run: () => { view = 'reading'; loadDashboard(); } },
-    { id: 'read', label: 'Read selected book', hint: selectedItem?.title || 'Select a book first', shortcut: 'r', run: () => { if (selectedItem) readingItem = selectedItem; } },
-    { id: 'open', label: 'Open selected file', hint: selectedItem?.title || 'Select a book first', shortcut: 'o', run: () => { if (selectedItem) api.open(selectedItem.id); } },
-    { id: 'queue', label: 'Add selected to queue', hint: selectedItem?.title || 'Select a book first', run: queueSelected },
-    { id: 'preview', label: 'Toggle preview panel', hint: 'Show or hide book details', shortcut: 'p', run: togglePreviewPanel },
-    { id: 'clear', label: 'Clear search and filters', hint: 'Return to the full library', run: clearFilters },
-    { id: 'rescan', label: 'Rescan library', hint: 'Refresh files and metadata', shortcut: 'R', run: rescan },
-    { id: 'settings', label: 'Open settings', hint: 'Choose library folders and review reader defaults', run: openSettings },
-    { id: 'theme', label: 'Toggle theme', hint: 'Switch between light and dark', run: toggleTheme },
-  ]);
-  $effect(() => { document.documentElement.setAttribute('data-theme', theme); });
-  onMount(() => {
-    search();
-    loadSidebarData();
-    window.addEventListener('keydown', handleKeydown);
-    api.settings().then(async (settings) => {
-      if (!settings.smoke_item_id) return;
-      const item = await api.item(settings.smoke_item_id);
-      selectedItem = item;
-      readingItem = item;
-    }).catch(() => {});
   });
-  onDestroy(() => { window.removeEventListener('keydown', handleKeydown); });
 </script>
 
-<div class="flex h-screen bg-surface-0 text-text-primary">
-  <!-- Left: Sidebar -->
-  <div class="w-56 border-r border-border bg-surface-1 shrink-0 hidden md:block">
-    <Sidebar {stats} {categories} {tags} {purposes} {activeType} {activeCategory} {activeTag} {activePurpose}
-      onSelectType={selectType} onSelectCategory={selectCategory} onSelectTag={selectTag} onSelectPurpose={selectPurpose} />
-  </div>
+<div class="h-full overflow-y-auto">
+  <div class="mx-auto w-full max-w-6xl space-y-7 p-6 pb-10">
+    <header class="flex flex-wrap items-end justify-between gap-4">
+      <div><p class="text-xs font-medium uppercase tracking-[0.12em] text-text-muted">Your workspace</p><h1 class="mt-1 text-2xl font-semibold tracking-[-0.02em]">Library Dashboard</h1><p class="mt-2 text-sm text-text-secondary">Pick up where you left off, or keep your catalog in shape.</p></div>
+      <div class="flex flex-wrap gap-2"><a class="ui-button-primary px-3 py-2 text-xs" href="/library">Browse library</a><a class="rounded-lg border border-border px-3 py-2 text-xs text-text-secondary hover:bg-surface-2" href="/review">Review metadata</a></div>
+    </header>
 
-  <!-- Middle: List -->
-  <div class="border-r border-border bg-surface-1 shrink-0 flex flex-col" class:flex-1={!showPreviewPanel} style={showPreviewPanel ? `width: ${middleWidth}px` : ''}>
-    <Toolbar {query} {view} {theme} {loading} {showPreviewPanel}
-      onQueryInput={handleQueryInput} onSearch={handleSearch}
-      onViewChange={(v) => { view = v; if (v === 'reading') loadDashboard(); }}
-      onToggleTheme={toggleTheme} onRescan={rescan} onShowCommands={() => (showCommandPalette = true)} onShowKeybindings={() => (showKeybindings = true)} onShowSettings={openSettings}
-      onTogglePreview={togglePreviewPanel} onQuit={quitApp} />
-    <div class="px-3 py-1.5 border-b border-border flex items-center gap-2">
-      <select bind:value={sortBy} onchange={() => { page = 1; search(); }} class="bg-surface-2 border border-border rounded px-2 py-1 text-xs text-text-secondary cursor-pointer">
-        <option value="">Sort: Title</option><option value="year">Sort: Year</option>
-        <option value="added">Sort: Recent</option><option value="size">Sort: Size</option>
-      </select>
-      <select bind:value={itemsPerPage} onchange={(e) => setItemsPerPage(parseInt((e.target as HTMLSelectElement).value, 10))} class="bg-surface-2 border border-border rounded px-2 py-1 text-xs text-text-secondary cursor-pointer">
-        <option value={10}>10 / page</option>
-        <option value={20}>20 / page</option>
-        <option value={40}>40 / page</option>
-        <option value={60}>60 / page</option>
-        <option value={100}>100 / page</option>
-      </select>
-      <button class="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:border-accent hover:text-text-primary" class:border-accent={bulkMode} onclick={toggleBulkMode} aria-pressed={bulkMode}>Select</button>
-      {#if bulkMode}
-        <button class="rounded px-2 py-1 text-xs text-text-muted hover:bg-surface-3" onclick={selectVisible}> {selectedIds.length === items.length && items.length > 0 ? 'Clear visible' : 'Select visible'} </button>
-        <select bind:value={bulkCategory} class="bg-surface-2 border border-border rounded px-2 py-1 text-xs text-text-secondary cursor-pointer" aria-label="Bulk category">
-          <option value="">Set category…</option>
-          {#each categories as category}<option value={category.name}>{category.name}</option>{/each}
-        </select>
-        <button class="rounded bg-accent px-2 py-1 text-xs text-white disabled:opacity-40" disabled={!selectedIds.length || !bulkCategory || bulkBusy} onclick={applyBulkEdit}>Apply ({selectedIds.length})</button>
-      {/if}
-      {#if lastBatchId}<button class="rounded px-2 py-1 text-xs text-accent hover:bg-accent/10" disabled={bulkBusy} onclick={undoBulkEdit}>Undo edit</button>{/if}
-      <div class="flex-1"></div>
-      <span class="text-[10px] text-text-muted">{total} items</span>
-    </div>
-    {#if hasFilters}
-      <div class="flex items-center gap-1.5 border-b border-border px-3 py-1.5 text-[10px]" aria-label="Active filters">
-        <span class="text-text-muted shrink-0">Filtered by</span>
-        {#if query}<button class="rounded bg-accent/10 px-1.5 py-0.5 text-accent hover:bg-accent/20" onclick={() => removeFilter('query')}>“{query}” ×</button>{/if}
-        {#if activeType}<button class="rounded bg-accent/10 px-1.5 py-0.5 text-accent hover:bg-accent/20" onclick={() => removeFilter('type')}>{activeType} ×</button>{/if}
-        {#if activeCategory}<button class="rounded bg-accent/10 px-1.5 py-0.5 text-accent hover:bg-accent/20" onclick={() => removeFilter('category')}>{activeCategory} ×</button>{/if}
-        {#if activeTag}<button class="rounded bg-accent/10 px-1.5 py-0.5 text-accent hover:bg-accent/20" onclick={() => removeFilter('tag')}>{activeTag} ×</button>{/if}
-        {#if activePurpose}<button class="rounded bg-accent/10 px-1.5 py-0.5 text-accent hover:bg-accent/20" onclick={() => removeFilter('purpose')}>{activePurpose} ×</button>{/if}
-        <button class="ml-auto text-text-muted hover:text-text-primary" onclick={clearFilters}>Clear</button>
-      </div>
-    {/if}
-    {#if facets && (hasFilters || query)}
-      <div class="flex items-center gap-1.5 border-b border-border px-3 py-1.5 text-[10px] overflow-x-auto" aria-label="Suggested filters">
-        <span class="text-text-muted shrink-0">Refine</span>
-        {#each facets.category.slice(0, 4) as facet}
-          <button class="rounded bg-surface-2 px-1.5 py-0.5 text-text-secondary hover:bg-accent/10 hover:text-accent whitespace-nowrap" onclick={() => selectCategory(facet.name)}>{facet.name} <span class="text-text-muted">{facet.count}</span></button>
-        {/each}
-        {#each facets.tag.slice(0, 3) as facet}
-          <button class="rounded bg-surface-2 px-1.5 py-0.5 text-text-secondary hover:bg-accent/10 hover:text-accent whitespace-nowrap" onclick={() => selectTag(facet.name)}>#{facet.name} <span class="text-text-muted">{facet.count}</span></button>
-        {/each}
-      </div>
-    {/if}
-    <div class="flex-1 overflow-y-auto">
-      {#if loading && items.length === 0}
-        <div class="p-4 text-center text-text-muted text-sm">Loading…</div>
-      {:else if items.length === 0}
-        <div class="p-4 text-center text-text-muted text-sm">No results</div>
-      {:else if view === 'list'}
-        {#each items as item (item.id)}
-          <BookRow {item} isSelected={selectedItem?.id === item.id} {query} {bulkMode} isBulkSelected={selectedIds.includes(item.id)} onToggleBulk={toggleBulk} onClick={selectItem} />
-        {/each}
-      {:else}
-        <div class="grid grid-cols-2 gap-2 p-2">
-          {#each items as item (item.id)}
-          <BookCard {item} isSelected={selectedItem?.id === item.id} {query}
-            {bulkMode} isBulkSelected={selectedIds.includes(item.id)} onToggleBulk={toggleBulk}
-            isReading={item.progress?.status === 'reading' || !!dashboard?.currently_reading.some((entry) => entry.item.id === item.id)}
-            progressPercent={item.progress?.progress_percent ?? dashboard?.currently_reading.find((entry) => entry.item.id === item.id)?.progress.progress_percent ?? 0}
-            onClick={selectItem} onRead={continueReading} />
-          {/each}
-        </div>
-      {/if}
-    </div>
-    {#if totalPages > 1}
-      <div class="flex items-center justify-between px-3 py-2 border-t border-border text-xs text-text-muted">
-        <span>{page}/{totalPages}</span>
-        <div class="flex gap-1">
-          <button class="px-2 py-0.5 rounded hover:bg-surface-3 disabled:opacity-30" disabled={page <= 1} onclick={() => { page--; search(); }}>Prev</button>
-          <button class="px-2 py-0.5 rounded hover:bg-surface-3 disabled:opacity-30" disabled={page >= totalPages} onclick={() => { page++; search(); }}>Next</button>
-        </div>
-      </div>
-    {/if}
-    {#if nextCursor}
-      <div class="border-t border-border px-3 py-2 text-center">
-        <button class="rounded bg-surface-2 px-3 py-1 text-xs text-text-secondary hover:bg-accent/10 hover:text-accent disabled:opacity-40" disabled={loading} onclick={loadMore}>
-          {loading ? 'Loading…' : `Load more · ${items.length} of ${total}`}
-        </button>
-      </div>
+    {#if error}
+      <section class="rounded-xl border border-error/30 bg-error/5 p-5"><h2 class="font-medium">Dashboard unavailable</h2><p class="mt-1 text-sm text-text-secondary">{error}</p></section>
+    {:else if !reading || !stats || !index}
+      <div class="grid gap-4 md:grid-cols-3" aria-hidden="true">{#each [0, 1, 2] as _}<div class="h-36 animate-pulse rounded-xl border border-border bg-surface-1"></div>{/each}</div>
+    {:else}
+      <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <a class="rounded-xl border border-border bg-surface-1 p-4 transition-colors hover:bg-surface-2" href="/library"><p class="text-xs text-text-secondary">Catalog</p><p class="mt-2 text-2xl font-semibold tabular-nums">{stats.total_items}</p><p class="mt-1 text-xs text-text-muted">{typeCount} documents and books</p></a>
+        <a class="rounded-xl border border-border bg-surface-1 p-4 transition-colors hover:bg-surface-2" href="/continue"><p class="text-xs text-text-secondary">In progress</p><p class="mt-2 text-2xl font-semibold tabular-nums">{reading.currently_reading.length}</p><p class="mt-1 text-xs text-text-muted">{reading.today_reading_minutes} minutes today</p></a>
+        <a class="rounded-xl border border-border bg-surface-1 p-4 transition-colors hover:bg-surface-2" href="/queue"><p class="text-xs text-text-secondary">Up next</p><p class="mt-2 text-2xl font-semibold tabular-nums">{reading.queue.length}</p><p class="mt-1 text-xs text-text-muted">{reading.week_reading_minutes} minutes this week</p></a>
+        <a class="rounded-xl border border-border bg-surface-1 p-4 transition-colors hover:bg-surface-2" href="/diagnostics"><div class="flex justify-between gap-2"><p class="text-xs text-text-secondary">Content index</p><span class="text-[11px] text-text-muted">{indexedPercent}%</span></div><div class="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-3"><div class="h-full rounded-full bg-accent" style:width={`${indexedPercent}%`}></div></div><p class="mt-3 text-xs text-text-muted">{indexLabel}</p></a>
+      </section>
+
+      <section class="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(18rem,0.7fr)]">
+        <article class="rounded-xl border border-border bg-surface-1 p-5"><div class="flex items-center justify-between gap-3"><div><h2 class="font-semibold">Continue reading</h2><p class="mt-1 text-xs text-text-secondary">Your active documents</p></div><a class="text-xs text-accent hover:underline" href="/continue">View all</a></div>
+          {#if reading.currently_reading.length === 0}<div class="mt-6 rounded-lg border border-dashed border-border px-4 py-8 text-center"><p class="text-sm font-medium">Nothing in progress</p><p class="mt-1 text-xs text-text-secondary">Open a book from your library to start reading.</p><a class="mt-3 inline-block text-xs text-accent hover:underline" href="/library">Find something to read</a></div>
+          {:else}<div class="mt-5 space-y-3">{#each reading.currently_reading.slice(0, 3) as entry (entry.item.id)}<a class="block rounded-lg border border-border p-3 transition-colors hover:bg-surface-2" href={`/reader/${entry.item.id}?returnTo=${encodeURIComponent('/')}`}><div class="flex justify-between gap-3"><div class="min-w-0"><p class="truncate text-sm font-medium">{entry.item.title}</p><p class="mt-1 truncate text-xs text-text-secondary">{entry.item.authors || 'Unknown author'}</p></div><span class="shrink-0 text-xs tabular-nums text-text-secondary">{Math.round(entry.progress.progress_percent)}%</span></div><div class="mt-3 h-1 overflow-hidden rounded-full bg-surface-3"><div class="h-full rounded-full bg-accent" style:width={`${Math.max(2, entry.progress.progress_percent)}%`}></div></div></a>{/each}</div>{/if}
+        </article>
+
+        <article class="rounded-xl border border-border bg-surface-1 p-5"><div class="flex items-center justify-between gap-3"><div><h2 class="font-semibold">Queue</h2><p class="mt-1 text-xs text-text-secondary">What is next</p></div><a class="text-xs text-accent hover:underline" href="/queue">Manage</a></div>
+          {#if reading.queue.length === 0}<p class="mt-6 text-sm text-text-secondary">Your queue is clear.</p><a class="mt-2 inline-block text-xs text-accent hover:underline" href="/library">Add from library</a>
+          {:else}<ol class="mt-4 space-y-2">{#each reading.queue.slice(0, 5) as entry, position (entry.id)}<li class="flex items-center gap-3 rounded-lg px-2 py-2"><span class="w-4 text-xs tabular-nums text-text-muted">{position + 1}</span><div class="min-w-0"><p class="truncate text-sm">{entry.title}</p><p class="truncate text-xs text-text-muted">{entry.author || 'Unknown author'}</p></div></li>{/each}</ol>{/if}
+        </article>
+      </section>
+
+      <section class="rounded-xl border border-border bg-surface-1 p-5"><div class="flex items-center justify-between gap-3"><div><h2 class="font-semibold">Recently added</h2><p class="mt-1 text-xs text-text-secondary">Latest additions to your catalog</p></div><a class="text-xs text-accent hover:underline" href="/recent">View all</a></div>
+        {#if stats.recent_added.length === 0}<p class="mt-5 text-sm text-text-secondary">No documents in your library yet. Add a scan directory in Settings to begin.</p>
+        {:else}<div class="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{#each stats.recent_added.slice(0, 6) as item (item.id)}<a class="rounded-lg border border-border px-3 py-3 transition-colors hover:bg-surface-2" href={`/reader/${item.id}?returnTo=${encodeURIComponent('/')}`}><p class="truncate text-sm font-medium">{item.title}</p><p class="mt-1 truncate text-xs text-text-secondary">{item.authors || 'Unknown author'}</p><p class="mt-2 text-[11px] text-text-muted">Added {formatDate(item.added_at)}</p></a>{/each}</div>{/if}
+      </section>
     {/if}
   </div>
-
-  <!-- Resize handle -->
-  {#if showPreviewPanel}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="w-1 hover:w-1.5 bg-border hover:bg-accent cursor-col-resize shrink-0 transition-all" class:animate-pulse={isResizing} onmousedown={startResize}></div>
-  {/if}
-
-  <!-- Right: Detail / Reading dashboard -->
-  {#if showPreviewPanel || (view === 'reading' && dashboard)}
-    <div class="flex-1 overflow-hidden bg-surface-0">
-      {#if view === 'reading' && dashboard}
-        <div class="p-6 max-w-4xl overflow-y-auto h-full">
-          <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" class="text-accent">
-              <path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
-            Reading Dashboard
-          </h2>
-          <div class="grid grid-cols-4 gap-3 mb-6">
-            <div class="bg-surface-1 border border-border rounded-lg p-3"><div class="text-2xl font-bold text-accent">{dashboard.total_read_books}</div><div class="text-[10px] text-text-muted uppercase">Finished</div></div>
-            <div class="bg-surface-1 border border-border rounded-lg p-3"><div class="text-2xl font-bold text-success">{dashboard.currently_reading.length}</div><div class="text-[10px] text-text-muted uppercase">Reading now</div></div>
-            <div class="bg-surface-1 border border-border rounded-lg p-3"><div class="text-2xl font-bold">{dashboard.today_reading_minutes}m</div><div class="text-[10px] text-text-muted uppercase">Today</div></div>
-            <div class="bg-surface-1 border border-border rounded-lg p-3"><div class="text-2xl font-bold">{dashboard.week_reading_minutes}m</div><div class="text-[10px] text-text-muted uppercase">This week</div></div>
-          </div>
-          {#if dashboard.currently_reading.length > 0}
-            <h3 class="text-sm font-semibold mb-2">Continue Reading</h3>
-            <div class="space-y-2 mb-6">
-              {#each dashboard.currently_reading as cr, index}
-                <button class="w-full text-left bg-surface-1 border border-border rounded-lg p-3 hover:border-accent/50 transition-colors" onclick={() => continueReading(cr.item)}>
-                  <div class="flex items-center justify-between mb-1">
-                    <span class="text-sm font-medium truncate">{cr.item.title}</span>
-                    <span class="text-xs text-text-muted">{cr.progress.progress_percent}%</span>
-                  </div>
-                  <div class="text-[10px] text-text-muted mb-2">{index === 0 ? 'Up next' : 'In progress'} · {cr.item.authors || 'Unknown author'}</div>
-                  <div class="h-1.5 bg-surface-3 rounded-full overflow-hidden"><div class="h-full bg-accent" style="width: {cr.progress.progress_percent}%"></div></div>
-                </button>
-              {/each}
-            </div>
-          {:else}
-            <div class="mb-6 rounded-lg border border-dashed border-border p-4 text-sm text-text-muted">Nothing in progress yet. Pick a book from your queue to begin.</div>
-          {/if}
-          <div class="flex items-center justify-between mb-2">
-            <h3 class="text-sm font-semibold">Read Next</h3>
-            {#if dashboard.queue.length > 0}<span class="text-[10px] text-text-muted">{dashboard.queue.length} queued</span>{/if}
-          </div>
-          {#if dashboard.queue.length > 0}
-            <div class="space-y-1" role="list" aria-label="Reading queue">
-              {#each dashboard.queue as q}
-                <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                <div
-                  class="flex items-center gap-2 text-sm bg-surface-1 border border-border rounded px-3 py-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
-                  class:border-accent={queueDropId === q.id}
-                  draggable="true"
-                  role="listitem"
-                  tabindex="0"
-                  onkeydown={(event) => { if (event.key === 'Enter') readQueueItem(q); if (event.key === 'Delete') skipQueueItem(q); }}
-                  ondragstart={() => (draggedQueueId = q.id)}
-                  ondragover={(event) => { event.preventDefault(); queueDropId = q.id; }}
-                  ondragleave={() => { if (queueDropId === q.id) queueDropId = null; }}
-                  ondrop={(event) => { event.preventDefault(); reorderQueue(q.id); }}
-                  ondragend={() => { draggedQueueId = null; queueDropId = null; }}
-                >
-                  <span class="text-text-muted cursor-grab" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</span>
-                  <span class="text-text-muted text-xs w-5">#{q.priority + 1}</span>
-                  <div class="min-w-0 flex-1"><div class="truncate">{q.title}</div><div class="text-[10px] text-text-muted truncate">{q.author || 'Unknown author'}</div></div>
-                  {#if q.item_id}
-                    <button class="px-2 py-1 text-[10px] rounded bg-accent/20 text-accent hover:bg-accent/30" onclick={() => readQueueItem(q)}>Read</button>
-                  {/if}
-                  <button class="px-2 py-1 text-[10px] rounded text-text-muted hover:bg-surface-3 hover:text-text-primary" title="Skip this book" onclick={() => skipQueueItem(q)}>Skip</button>
-                </div>
-              {/each}
-            </div>
-          {:else}
-            <div class="rounded-lg border border-dashed border-border p-4 text-sm text-text-muted">Your reading queue is empty.</div>
-          {/if}
-        </div>
-      {:else}
-        <DetailPanel item={selectedItem} progress={selectedProgress} sessions={selectedSessions}
-          isQueued={!!dashboard?.queue.some((queueItem) => queueItem.item_id === selectedItem?.id)}
-          onOpen={(item) => api.open(item.id)}
-          onDelete={(item) => { selectedItem = item; showDeleteModal = true; }}
-          onRead={(item) => (readingItem = item)}
-          onSaved={onSaved}
-          onProgressChanged={() => selectedItem && loadProgress(selectedItem)}
-          onQueueChanged={loadDashboard} />
-      {/if}
-    </div>
-  {/if}
 </div>
-
-{#if readingItem}
-  <Reader item={readingItem} onClose={() => (readingItem = null)} onFinished={() => { loadDashboard(); }} />
-{/if}
-
-<Modals showDelete={showDeleteModal} showKeybindings={showKeybindings} itemTitle={selectedItem?.title || ''}
-  onConfirmDelete={deleteItem} onCancelDelete={() => (showDeleteModal = false)} onCloseKeybindings={() => (showKeybindings = false)} />
-{#if showCommandPalette}<CommandPalette commands={commands} onClose={() => (showCommandPalette = false)} />{/if}
-{#if showSettings && appSettings}<SettingsPanel settings={appSettings} onClose={() => (showSettings = false)} onSave={saveSettings} onSaveReading={saveReadingPreferences} />{/if}

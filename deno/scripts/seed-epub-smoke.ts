@@ -32,7 +32,7 @@ function concat(...parts: Uint8Array[]): Uint8Array {
   return output;
 }
 
-function zip(entries: Array<{ name: string; text: string }>): Uint8Array {
+function zip(entries: Array<{ name: string; text?: string; data?: Uint8Array }>): Uint8Array {
   const encoder = new TextEncoder();
   const local: Uint8Array[] = [];
   const central: Uint8Array[] = [];
@@ -41,7 +41,7 @@ function zip(entries: Array<{ name: string; text: string }>): Uint8Array {
 
   for (const entry of entries) {
     const name = encoder.encode(entry.name);
-    const data = encoder.encode(entry.text);
+    const data = entry.data ?? encoder.encode(entry.text ?? "");
     const crc = crc32(data);
     const header = concat(
       u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0),
@@ -90,7 +90,11 @@ const fixture = zip([
   {
     name: "OEBPS/content.opf",
     text: `<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Desktop EPUB Smoke Fixture</dc:title><dc:creator>Library Test</dc:creator><dc:language>en</dc:language><dc:identifier id="book-id">library-smoke</dc:identifier></metadata><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>`,
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Desktop EPUB Smoke Fixture</dc:title><dc:creator>Library Test</dc:creator><dc:language>en</dc:language><dc:identifier id="book-id">library-smoke</dc:identifier><meta name="cover" content="cover-image"/></metadata><manifest><item id="cover-image" href="cover.png" media-type="image/png"/><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>`,
+  },
+  {
+    name: "OEBPS/cover.png",
+    data: Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="), (character) => character.charCodeAt(0)),
   },
   {
     name: "OEBPS/chapter.xhtml",

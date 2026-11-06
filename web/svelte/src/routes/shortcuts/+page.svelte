@@ -1,0 +1,1 @@
+<script lang="ts"></script><div class="grid max-w-xl gap-2 text-sm"><p><kbd>⌘K</kbd> Search or open anything</p><p><kbd>⌘J</kbd> Continue Reading</p><p><kbd>⌘Q</kbd> Queue</p><p><kbd>⌘\</kbd> Toggle sidebar</p><p><kbd>Enter</kbd> Open selected item</p><p><kbd>R</kbd> Read selected item</p><p><kbd>Esc</kbd> Close the current layer</p></div>

@@ -28,7 +28,9 @@
     let matchCurrent = $state(0);
     let matchTotal = $state(0);
     let showToc = $state(false);
+    let showBookmarks = $state(false);
     let outline = $state<{ title: string; dest: any; depth: number }[]>([]);
+    let bookmarks = $state<{ id: number; location: string; label: string; percent: number }[]>([]);
 
     let mounted = true;
     let pdfjs: any = null;
@@ -77,6 +79,7 @@
                 current_page: currentPage,
                 total_pages: totalPages,
                 progress_percent: percent,
+                location: `pdf-page:${currentPage}`,
             })
                 .catch(() => {});
         }, 500);
@@ -112,6 +115,28 @@
         if (!pdfViewer) return;
         pdfViewer.currentScaleValue = DEFAULT_SCALE / 100;
         scalePct = DEFAULT_SCALE;
+    }
+    const bookmarkLocation = () => `pdf-page:${currentPage}`;
+    const bookmarked = () => bookmarks.some((bookmark) => bookmark.location === bookmarkLocation());
+    async function toggleBookmark() {
+        const location = bookmarkLocation();
+        if (bookmarked()) {
+            await api.removeBookmark(item.id, location);
+            bookmarks = bookmarks.filter((bookmark) => bookmark.location !== location);
+            return;
+        }
+        const percent = totalPages ? Math.round((currentPage / totalPages) * 100) : 0;
+        const saved = await api.addBookmark(item.id, { location, label: `Page ${currentPage}`, percent });
+        bookmarks = [{ id: saved.id, location: saved.location, label: saved.label, percent: saved.percent }, ...bookmarks];
+    }
+    async function removeBookmark(location: string) {
+        await api.removeBookmark(item.id, location);
+        bookmarks = bookmarks.filter((bookmark) => bookmark.location !== location);
+    }
+    function openBookmark(location: string) {
+        const page = Number(location.match(/^pdf-page:(\d+)$/)?.[1]);
+        if (page) goToPage(page);
+        showBookmarks = false;
     }
 
     function runSearch() {
@@ -202,6 +227,7 @@
 
     onMount(async () => {
         window.addEventListener("keydown", onKey);
+        bookmarks = await api.bookmarks(item.id).catch(() => []);
         const appSettings = await api.settings().catch(() => null);
         scalePct = appSettings?.reading_preferences?.pdfZoom ?? loadReaderPreferences().pdfZoom;
         if (!container || !viewerEl) return;
@@ -266,7 +292,8 @@
             eventBus.on("updatefindmatchescount", onMatches);
             eventBus.on("updatefindcontrolstate", onMatches);
 
-            // Restore position: localStorage first, then server progress.
+            // Restore position: localStorage is a fast cache, then durable
+            // SQLite progress provides the cross-origin fallback.
             let startPage = 1;
             try {
                 const saved = parseInt(localStorage.getItem(`library:pdf-page:${item.id}`) || "", 10);
@@ -274,6 +301,8 @@
             } catch {}
             try {
                 const progress = await api.readingProgress(item.id);
+                const durablePage = Number(progress?.location?.match(/^pdf-page:(\d+)$/)?.[1] || 0);
+                if (startPage <= 1 && durablePage > 0) startPage = durablePage;
                 if (startPage <= 1 && progress?.current_page > 0) startPage = progress.current_page;
             } catch {}
 
@@ -410,6 +439,10 @@
         >
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="18" x2="20" y2="18" /></svg>
         </button>
+        <button class="p-1.5 rounded hover:bg-surface-3 transition-colors" class:bg-surface-3={showBookmarks} class:text-accent={bookmarked()} title={bookmarked() ? "Remove bookmark" : "Add bookmark"} aria-label={bookmarked() ? "Remove bookmark" : "Add bookmark"} disabled={loading} onclick={() => void toggleBookmark()}>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill={bookmarked() ? "currentColor" : "none"} stroke="currentColor" stroke-width="2"><path d="M6 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18l-6-3-6 3V4z" /></svg>
+        </button>
+        <button class="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-3" class:bg-surface-3={showBookmarks} title="Show bookmarks" aria-label="Show PDF bookmarks" onclick={() => showBookmarks = !showBookmarks}>Saved {bookmarks.length}</button>
         <button
             class="p-1.5 rounded hover:bg-surface-3 transition-colors"
             class:bg-surface-3={showSearch}
@@ -446,20 +479,26 @@
 
     <!-- Virtualized page viewport (pdf.js requires absolute positioning) -->
     <div class="flex-1 min-h-0 relative bg-surface-0">
-        {#if showToc}
+        {#if showToc || showBookmarks}
             <aside class="absolute top-0 bottom-0 left-0 z-30 w-80 max-w-[88vw] border-r border-border bg-surface-1 shadow-2xl flex flex-col">
                 <div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
                     <div>
-                        <div class="text-sm font-medium">Contents</div>
-                        <div class="text-[10px] text-text-muted">{outline.length} sections</div>
+                        <div class="text-sm font-medium">{showBookmarks ? 'Bookmarks' : 'Contents'}</div>
+                        <div class="text-[10px] text-text-muted">{showBookmarks ? `${bookmarks.length} saved` : `${outline.length} sections`}</div>
                     </div>
-                    <button class="p-1.5 rounded hover:bg-surface-3" aria-label="Close contents" title="Close" onclick={() => (showToc = false)}>
+                    <button class="p-1.5 rounded hover:bg-surface-3" aria-label="Close panel" title="Close" onclick={() => { showToc = false; showBookmarks = false; }}>
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
                     </button>
                 </div>
                 <div class="overflow-y-auto p-2">
-                    {#if outline.length === 0}
+                    {#if showBookmarks && bookmarks.length === 0}
+                        <div class="p-4 text-xs text-text-muted">Save the current page with the bookmark button.</div>
+                    {:else if !showBookmarks && outline.length === 0}
                         <div class="p-4 text-xs text-text-muted">This document does not provide a table of contents.</div>
+                    {:else if showBookmarks}
+                        {#each bookmarks as bookmark}
+                            <div class="group flex items-center gap-1 rounded hover:bg-surface-3"><button class="min-w-0 flex-1 px-3 py-2 text-left text-xs text-text-secondary hover:text-text-primary" onclick={() => openBookmark(bookmark.location)}><div>{bookmark.label}</div><div class="mt-0.5 text-[10px] text-text-muted">{bookmark.percent}%</div></button><button class="p-2 text-text-muted hover:text-error" title="Remove bookmark" aria-label={`Remove ${bookmark.label}`} onclick={() => void removeBookmark(bookmark.location)}>×</button></div>
+                        {/each}
                     {:else}
                         {#each outline as entry}
                             {#if entry.dest}

@@ -1,9 +1,11 @@
 import { assertEquals } from "@std/assert";
 import {
-  extractTitle,
+  calculateContentHash,
   extractAuthors,
-  extractYear,
+  extractIdentifiers,
+  extractTitle,
   extractTitleFromFirstPageText,
+  extractYear,
   scanDirectory,
 } from "../src/scanner.ts";
 import { DB } from "../src/db.ts";
@@ -11,7 +13,10 @@ import { assert } from "@std/assert";
 
 Deno.test("extractTitle cleans filenames", () => {
   const cases = [
-    { input: "The Go Programming Language.pdf", want: "The Go Programming Language" },
+    {
+      input: "The Go Programming Language.pdf",
+      want: "The Go Programming Language",
+    },
     { input: "book_with_underscores.pdf", want: "book with underscores" },
     { input: "test (z-library.sk).pdf", want: "test" },
     { input: "Design Patterns (Gang of Four).pdf", want: "Design Patterns" },
@@ -53,6 +58,22 @@ Deno.test("extractYear finds 4-digit years", () => {
   for (const { input, want } of cases) {
     assertEquals(extractYear(input), want, `failed for: ${input}`);
   }
+});
+
+Deno.test("identifier extraction validates DOI, ISBN, and arXiv identifiers", () => {
+  assertEquals(
+    extractIdentifiers(`
+    doi:10.1145/3293882.3330550
+    ISBN 978-0-13-468599-1
+    arXiv: 2410.13080v2
+  `),
+    {
+      doi: "10.1145/3293882.3330550",
+      isbn: "9780134685991",
+      arxiv_id: "2410.13080v2",
+    },
+  );
+  assertEquals(extractIdentifiers("ISBN 978-0-13-468599-2").isbn, "");
 });
 
 Deno.test("first-page title extraction rejects continuation lines", () => {
@@ -107,4 +128,28 @@ Deno.test("scan does not mark items under an unreadable root as missing", async 
   assert(item.ok);
   if (item.ok) assertEquals(item.value.missing_at, null);
   db.close();
+});
+
+Deno.test("scan recovers a renamed file by content hash", async () => {
+  const db = new DB(":memory:");
+  const root = await Deno.makeTempDir();
+  const oldPath = `${root}/old-name.pdf`;
+  const newPath = `${root}/new-name.pdf`;
+  await Deno.writeTextFile(oldPath, "stable document bytes");
+  const hash = await calculateContentHash(oldPath);
+  const stat = await Deno.stat(oldPath);
+  db.connection.prepare(
+    "INSERT INTO items (title, path, filename, size, content_hash) VALUES (?, ?, ?, ?, ?)",
+  ).run("Stable document", oldPath, "old-name.pdf", stat.size, hash);
+  await Deno.rename(oldPath, newPath);
+
+  const result = await scanDirectory(db, [root]);
+  assert(result.ok);
+  if (result.ok) assertEquals(result.value.moved, 1);
+  const item = db.getItem(1);
+  assert(item.ok);
+  if (item.ok) assertEquals(item.value.path, newPath);
+
+  db.close();
+  await Deno.remove(root, { recursive: true });
 });

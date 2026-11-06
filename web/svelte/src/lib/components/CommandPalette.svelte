@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { fade, fly } from 'svelte/transition';
+  import { reducedMotion } from '$lib/motion';
 
   type Command = { id: string; label: string; hint: string; shortcut?: string; run: () => void };
   let { commands, onClose }: { commands: Command[]; onClose: () => void } = $props();
@@ -28,15 +30,24 @@
   onMount(() => input?.focus());
 </script>
 
-<div class="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] p-[12vh_1rem]" role="presentation" onclick={onClose}>
+<div class="fixed inset-0 z-50 bg-black/55 backdrop-blur-[3px] p-[12vh_1rem]" role="presentation" onclick={onClose} transition:fade={{ duration: reducedMotion() ? 0 : 130 }}>
   <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role a11y_click_events_have_key_events -->
-  <div class="mx-auto max-w-xl overflow-hidden rounded-xl border border-border bg-surface-1 shadow-2xl" role="dialog" aria-modal="true" aria-label="Command palette" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
+  <div
+    class="mx-auto max-w-xl overflow-hidden rounded-xl border border-border bg-surface-1 shadow-2xl shadow-black/40"
+    transition:fly={{ y: 10, duration: reducedMotion() ? 0 : 200 }}
+    role="dialog"
+    aria-modal="true"
+    aria-label="Command palette"
+    tabindex="-1"
+    onclick={(event) => event.stopPropagation()}
+    onkeydown={(event) => event.stopPropagation()}
+  >
     <div class="flex items-center gap-3 border-b border-border px-4 py-3">
       <span class="text-accent text-lg">⌘</span>
       <input bind:this={input} bind:value={query} onkeydown={onKeydown} class="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-text-muted" placeholder="Jump to an action…" aria-label="Search commands" />
       <kbd class="rounded border border-border bg-surface-2 px-1.5 py-0.5 text-[10px] text-text-muted">Esc</kbd>
     </div>
-    <div class="max-h-[52vh] overflow-y-auto p-2">
+    <div class="max-h-[46vh] overflow-y-auto p-2">
       {#if filtered.length === 0}
         <div class="px-3 py-8 text-center text-xs text-text-muted">No matching commands</div>
       {:else}
@@ -47,6 +58,11 @@
           </button>
         {/each}
       {/if}
+    </div>
+    <div class="flex items-center gap-4 border-t border-border px-4 py-2 text-[10px] text-text-muted" transition:fade={{ duration: reducedMotion() ? 0 : 130, delay: reducedMotion() ? 0 : 80 }}>
+      <span class="flex items-center gap-1.5"><kbd class="rounded border border-border bg-surface-2 px-1 text-[9px] py-0.5 text-text-secondary">↑↓</kbd> move</span>
+      <span class="flex items-center gap-1.5"><kbd class="rounded border border-border bg-surface-2 px-1 text-[9px] py-0.5 text-text-secondary">↵</kbd> run</span>
+      <span class="flex items-center gap-1.5"><kbd class="rounded border border-border bg-surface-2 px-1 text-[9px] py-0.5 text-text-secondary">esc</kbd> close</span>
     </div>
   </div>
 </div>

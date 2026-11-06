@@ -2,6 +2,25 @@
 
 export type BookType = "book" | "paper" | "thesis" | "ebook" | "other";
 
+export type MetadataSource =
+  | "pdf_embedded"
+  | "pdf_first_pages"
+  | "epub_opf"
+  | "filename"
+  | "ocr"
+  | "grobid"
+  | "crossref"
+  | "open_library"
+  | "manual";
+
+export interface MetadataEvidence {
+  field: string;
+  value: string;
+  source: MetadataSource;
+  confidence: number;
+  extractor_version: string;
+}
+
 export interface Item {
   id: number;
   title: string;
@@ -14,6 +33,12 @@ export interface Item {
   tags: string;
   purpose: string;
   description: string;
+  publisher?: string;
+  language?: string;
+  doi?: string;
+  isbn?: string;
+  arxiv_id?: string;
+  content_hash?: string;
   size: number;
   added_at: string;
   updated_at: string;
@@ -21,6 +46,7 @@ export interface Item {
   locked_fields?: string;
   missing_at?: string | null;
   ignored?: number;
+  metadata_evidence?: MetadataEvidence[];
 }
 
 export interface ItemUpdate {
@@ -32,6 +58,30 @@ export interface ItemUpdate {
   tags?: string | null;
   purpose?: string | null;
   description?: string | null;
+  publisher?: string | null;
+  language?: string | null;
+  doi?: string | null;
+  isbn?: string | null;
+  arxiv_id?: string | null;
+}
+
+export type MetadataSuggestionStatus = "pending" | "applied" | "rejected";
+
+export interface MetadataSuggestion {
+  id: number;
+  item_id: number;
+  field: keyof Pick<Item, "title" | "authors" | "year" | "publisher" | "language" | "doi" | "isbn" | "description">;
+  value: string;
+  source: Extract<MetadataSource, "crossref" | "open_library" | "grobid">;
+  confidence: number;
+  details_json: string;
+  status: MetadataSuggestionStatus;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface PendingMetadataSuggestion extends MetadataSuggestion {
+  item: Item;
 }
 
 // Search
@@ -55,6 +105,15 @@ export interface SearchQuery {
   cursor?: string;
 }
 
+export interface Collection {
+  id: number;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+  item_count: number;
+}
+
 export interface SearchResult {
   items: SearchItem[];
   total: number;
@@ -74,6 +133,46 @@ export interface SearchFacets {
 
 export interface SearchItem extends Item {
   progress: ReadingProgress | null;
+  match_snippet?: string | null;
+}
+
+export type ContentIndexStatus =
+  | "indexed"
+  | "needs_ocr"
+  | "unavailable"
+  | "failed"
+  | "truncated";
+
+export interface DocumentChunk {
+  location: string;
+  heading: string;
+  content: string;
+}
+
+export interface ContentIndexState {
+  item_id: number;
+  content_hash: string;
+  status: ContentIndexStatus;
+  chunk_count: number;
+  indexed_at: string;
+  error: string;
+}
+
+export interface ContentIndexStats {
+  indexed: number;
+  truncated: number;
+  needs_ocr: number;
+  failed: number;
+  unavailable: number;
+  pending: number;
+  total: number;
+}
+
+export interface ContentSearchResult {
+  item: SearchItem;
+  location: string;
+  heading: string;
+  snippet: string;
 }
 
 // Statistics
@@ -176,6 +275,15 @@ export interface ReadingStatusItem {
   progress: ReadingProgress;
   today_minutes: number;
   total_minutes: number;
+}
+
+export interface Annotation {
+  id: number;
+  item_id: number;
+  cfi_range: string;
+  text: string;
+  note: string;
+  created_at: string;
 }
 
 // Readest sync
